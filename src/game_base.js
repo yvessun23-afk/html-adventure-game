@@ -1,0 +1,2403 @@
+
+'use strict';
+/* =====================================================================
+   Das Schloss der verlorenen Jahreszeiten – Comic-Adventure
+   Alle Grafiken werden im Code gemalt (kein Asset-Download nötig).
+   ===================================================================== */
+const W = 960, H = 540, GY = 470;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const INK = '#2a1810';
+const FONT = '"Comic Sans MS","Comic Neue","Chalkboard SE","Marker Felt","Trebuchet MS",sans-serif';
+let AUTO = /[?&]auto/.test(location.search);       // Testmodus: Texte überspringen
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const now = () => performance.now() / 1000;
+
+/* ---------- Farben & Zufall ---------- */
+function R(seed) { let s = (seed * 9301 + 49297) % 233280; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }
+function hex(h) { h = h.replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
+function mix(a, b, t) { const A = hex(a), B = hex(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); }
+const dark = (c, t = .25) => mix(c, '#20101a', t), light = (c, t = .25) => mix(c, '#ffffff', t);
+
+const PAL = {
+  fr: { sky: ['#63c1f0', '#e6f8ff'], hill1: '#a4dc72', hill2: '#86c860', ground: '#8bd25e', ground2: '#6db94a', path: '#e3c98c', leaf: '#83d55c', leaf2: '#5fb745', pine: '#3f9550', blossom: '#ffb7d3', trunk: '#7d4e2c', mtn: '#a9c8e8', mtn2: '#8badd4', sun: '#fff3a0', roof: '#c8583c' },
+  so: { sky: ['#2b95e6', '#bfeaff'], hill1: '#7ec850', hill2: '#5fae3c', ground: '#70c546', ground2: '#54ab3a', path: '#e6c88a', leaf: '#4fb238', leaf2: '#3a9030', pine: '#2b7d3f', blossom: '#ffd84a', trunk: '#7d4e2c', mtn: '#a0bbe0', mtn2: '#829fca', sun: '#fff29a', roof: '#c8483a' },
+  he: { sky: ['#ee9a56', '#ffe5ac'], hill1: '#cfae44', hill2: '#bb882c', ground: '#bda440', ground2: '#9c8532', path: '#dab67e', leaf: '#e77b26', leaf2: '#c9501c', pine: '#3a7a3c', blossom: '#ffce54', trunk: '#6f4426', mtn: '#c99e8c', mtn2: '#aa7c7c', sun: '#ffd26c', roof: '#a8422c' },
+  wi: { sky: ['#a3c1e2', '#f2f7fd'], hill1: '#eaf2fa', hill2: '#d5e4f3', ground: '#f3f8fd', ground2: '#d2e1f0', path: '#c6d5e6', leaf: '#ecf4fa', leaf2: '#c3d7ea', pine: '#3d7150', blossom: '#ffffff', trunk: '#6a4a34', mtn: '#cbdaee', mtn2: '#b1c7df', sun: '#fffbe8', roof: '#a04a3e' }
+};
+const SEASONS = { fr: 'Frühling', so: 'Sommer', he: 'Herbst', wi: 'Winter' };
+const SEASON_ICON = { fr: '🌸', so: '☀️', he: '🍂', wi: '❄️' };
+
+/* ---------- Mal-Werkzeuge (Comic: dicke Konturen, weiche Schatten) ---------- */
+function blobPath(c, x, y, rx, ry, seed) {
+  const r = R(seed), n = 12, pts = [];
+  for (let i = 0; i < n; i++) { const a = i / n * 6.2832, k = 1 + (r() - .5) * .2; pts.push([x + Math.cos(a) * rx * k, y + Math.sin(a) * ry * k]); }
+  const m = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  c.beginPath(); const s = m(pts[n - 1], pts[0]); c.moveTo(s[0], s[1]);
+  for (let i = 0; i < n; i++) { const p = pts[i], q = m(p, pts[(i + 1) % n]); c.quadraticCurveTo(p[0], p[1], q[0], q[1]); }
+  c.closePath();
+}
+function stroke(c, lw = 3) { if (lw) { c.lineWidth = lw; c.strokeStyle = INK; c.lineJoin = 'round'; c.lineCap = 'round'; c.stroke(); } }
+function shadeFill(c, fill, x, y, rx, ry, sh = true) {
+  c.fillStyle = fill; c.fill();
+  if (sh) {
+    c.save(); c.clip();
+    c.fillStyle = 'rgba(20,10,30,.20)'; c.beginPath(); c.ellipse(x + rx * .35, y + ry * .45, rx * 1.1, ry * .95, 0, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.24)'; c.beginPath(); c.ellipse(x - rx * .35, y - ry * .4, rx * .5, ry * .38, -.5, 0, 7); c.fill();
+    c.restore();
+  }
+}
+function blob(c, x, y, rx, ry, fill, seed = 1, lw = 3, sh = true) { blobPath(c, x, y, rx, ry, seed); if (fill) shadeFill(c, fill, x, y, rx, ry, sh); stroke(c, lw); }
+function poly(c, pts, fill, lw = 3) {
+  c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]); c.closePath();
+  if (fill) { c.fillStyle = fill; c.fill(); } stroke(c, lw);
+}
+function rrect(c, x, y, w, h, r, fill, lw = 3) {
+  c.beginPath(); c.roundRect(x, y, w, h, r); if (fill) { c.fillStyle = fill; c.fill(); } stroke(c, lw);
+}
+function line(c, pts, col = INK, lw = 3) { c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]); c.strokeStyle = col; c.lineWidth = lw; c.lineCap = 'round'; c.lineJoin = 'round'; c.stroke(); }
+function thick(c, pts, col, lw) { line(c, pts, INK, lw + 4); line(c, pts, col, lw); }
+function grad(c, x0, y0, x1, y1, stops) { const g = c.createLinearGradient(x0, y0, x1, y1); stops.forEach((s, i) => g.addColorStop(i / (stops.length - 1), s)); return g; }
+function txt(c, s, x, y, size = 20, col = '#fff', align = 'left', bold = true, outline = true) {
+  c.font = (bold ? 'bold ' : '') + size + 'px ' + FONT; c.textAlign = align; c.textBaseline = 'alphabetic';
+  if (outline) { c.lineWidth = 4; c.strokeStyle = INK; c.lineJoin = 'round'; c.strokeText(s, x, y); }
+  c.fillStyle = col; c.fillText(s, x, y);
+}
+function wrap(c, s, maxW, size = 20) {
+  c.font = 'bold ' + size + 'px ' + FONT; const out = []; let cur = '';
+  for (const w of s.split(' ')) { const t = cur ? cur + ' ' + w : w; if (c.measureText(t).width > maxW && cur) { out.push(cur); cur = w; } else cur = t; }
+  if (cur) out.push(cur); return out;
+}
+
+/* ---------- Landschaftsteile ---------- */
+function mountains(c, P, y, seed, col, snow) {
+  const r = R(seed); let x = -60;
+  while (x < W + 60) {
+    const w = 130 + r() * 110, h = 60 + r() * 90, ax = x + w / 2 + (r() - .5) * 40;
+    c.beginPath(); c.moveTo(x, y + 150); c.lineTo(x, y + 60); c.lineTo(x + w * .3, y - h * .55); c.lineTo(ax, y - h); c.lineTo(x + w * .75, y - h * .5); c.lineTo(x + w, y + 60); c.lineTo(x + w, y + 150); c.closePath();
+    c.fillStyle = col; c.fill(); stroke(c, 2.5);
+    c.fillStyle = 'rgba(30,20,60,.16)'; c.beginPath(); c.moveTo(ax, y - h); c.lineTo(x + w * .75, y - h * .5); c.lineTo(x + w, y + 60); c.lineTo(ax + 10, y + 60); c.closePath(); c.fill();
+    if (snow) { c.beginPath(); c.moveTo(ax, y - h); c.lineTo(x + w * .3 + (ax - x - w * .3) * .35, y - h * .55 - 10 + h * .3); c.lineTo(ax - 6, y - h * .68 + 10); c.lineTo(ax + 10, y - h * .7); c.lineTo(x + w * .75 - (x + w * .75 - ax) * .35, y - h * .5 - 6 + h * .3); c.closePath(); c.fillStyle = '#fff'; c.fill(); stroke(c, 2); }
+    x += w * .62;
+  }
+}
+function hills(c, y, amp, fill, seed, lw = 3) {
+  const r = R(seed), ph = r() * 6, ph2 = r() * 6; c.beginPath(); c.moveTo(0, H);
+  for (let x = 0; x <= W; x += 20) c.lineTo(x, y + Math.sin(x / 130 + ph) * amp + Math.sin(x / 47 + ph2) * amp * .25);
+  c.lineTo(W, H); c.closePath(); c.fillStyle = fill; c.fill(); stroke(c, lw);
+}
+function groundBase(c, P, se) {
+  hills(c, 340, 22, P.hill1, 3); hills(c, 385, 16, P.hill2, 7);
+  c.fillStyle = grad(c, 0, 405, 0, H, [P.ground, P.ground2]); c.fillRect(0, 410, W, H - 410);
+  c.beginPath(); c.moveTo(0, 410); for (let x = 0; x <= W; x += 24) c.lineTo(x, 410 + Math.sin(x / 60) * 4); c.strokeStyle = INK; c.lineWidth = 3.5; c.stroke();
+  // Weg
+  c.fillStyle = P.path; c.beginPath(); c.moveTo(0, 452); c.quadraticCurveTo(W / 2, 440, W, 452); c.lineTo(W, 505); c.quadraticCurveTo(W / 2, 512, 0, 505); c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(42,24,16,.55)'; c.lineWidth = 2; c.stroke();
+  const r = R(5); c.lineWidth = 2; c.strokeStyle = dark(P.path, .25);
+  for (let i = 0; i < 40; i++) { const x = r() * W, y = 462 + r() * 38; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 8 + r() * 10, y + 1); c.stroke(); }
+  // Grashalme
+  c.strokeStyle = dark(P.ground2, .3); c.lineWidth = 2.5;
+  for (let i = 0; i < 70; i++) { const x = r() * W, y = 418 + r() * 30; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 3, y - 8); c.moveTo(x, y); c.lineTo(x + 3, y - 9); c.stroke(); }
+  for (let i = 0; i < 40; i++) { const x = r() * W, y = 515 + r() * 22; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 3, y - 9); c.moveTo(x, y); c.lineTo(x + 4, y - 10); c.stroke(); }
+}
+function pine(c, x, y, s, se, seed = 1) {
+  const P = PAL[se], r = R(seed); const col = mix(P.pine, '#1e5a3a', r() * .3);
+  rrect(c, x - 7 * s, y - 34 * s, 14 * s, 38 * s, 3, '#6b4423', 3);
+  for (let i = 0; i < 4; i++) {
+    const base = y - 22 * s - i * 34 * s, hw = (48 - i * 9) * s, top = base - 62 * s;
+    const pts = [[x, top], [x + hw, base]]; for (let k = 3; k >= 0; k--) pts.push([x + hw * (k / 2 - 1) * -1 * -1 + (k % 2 ? 0 : 0), base + (k % 2 ? -8 : 2) * s]);
+    poly(c, [[x, top], [x + hw * .55, base - 26 * s], [x + hw, base], [x + hw * .5, base - 8 * s], [x, base + 4 * s], [x - hw * .5, base - 8 * s], [x - hw, base], [x - hw * .55, base - 26 * s]], col, 3);
+    c.fillStyle = 'rgba(10,20,40,.18)'; c.beginPath(); c.moveTo(x, top); c.lineTo(x + hw, base); c.lineTo(x + hw * .5, base - 8 * s); c.lineTo(x, base + 4 * s); c.closePath(); c.fill();
+    if (se === 'wi') { poly(c, [[x, top], [x + hw * .4, base - 34 * s], [x + hw * .15, base - 30 * s], [x, base - 38 * s], [x - hw * .2, base - 30 * s], [x - hw * .4, base - 34 * s]], '#fff', 2.5); }
+  }
+}
+function bare(c, x, y, s, r, depth, lw, ang) {
+  const len = (26 + r() * 18) * s, x2 = x + Math.sin(ang) * len, y2 = y - Math.cos(ang) * len;
+  thick(c, [[x, y], [x2, y2]], '#6a4a34', lw); if (depth > 0) { bare(c, x2, y2, s * .9, r, depth - 1, lw * .7, ang - .5 - r() * .3); bare(c, x2, y2, s * .9, r, depth - 1, lw * .7, ang + .5 + r() * .3); }
+}
+function tree(c, x, y, s, se, seed = 1, apples = false) {
+  const P = PAL[se], r = R(seed);
+  const tr = [[x - 13 * s, y], [x - 9 * s, y - 60 * s], [x - 16 * s, y - 100 * s], [x + 2 * s, y - 84 * s], [x + 14 * s, y - 108 * s], [x + 9 * s, y - 60 * s], [x + 15 * s, y]];
+  poly(c, tr, P.trunk, 3.5);
+  c.fillStyle = 'rgba(20,10,30,.2)'; c.beginPath(); c.moveTo(x + 4 * s, y); c.lineTo(x + 8 * s, y - 60 * s); c.lineTo(x + 14 * s, y - 106 * s); c.lineTo(x + 15 * s, y); c.fill();
+  if (se === 'wi') {
+    const rr = R(seed + 3); bare(c, x, y - 80 * s, s * 1.3, rr, 3, 7 * s, -.5); bare(c, x + 8 * s, y - 84 * s, s * 1.2, rr, 3, 6 * s, .55);
+    blob(c, x - 30 * s, y - 138 * s, 18 * s, 8 * s, '#fff', seed + 4, 2.5, false); blob(c, x + 36 * s, y - 132 * s, 20 * s, 8 * s, '#fff', seed + 5, 2.5, false);
+    return;
+  }
+  const spots = [[-38, -128, 44, 34], [30, -132, 46, 36], [0, -158, 52, 38], [-8, -112, 60, 34], [-58, -108, 32, 26], [56, -108, 34, 26]];
+  spots.forEach((p, i) => blob(c, x + p[0] * s, y + p[1] * s, p[2] * s, p[3] * s, i % 2 ? P.leaf : P.leaf2, seed + i, 3.5));
+  const rr = R(seed + 9);
+  if (se === 'fr') for (let i = 0; i < 16; i++) { c.fillStyle = P.blossom; c.beginPath(); c.arc(x + (rr() - .5) * 120 * s, y - (100 + rr() * 80) * s, 4.2 * s, 0, 7); c.fill(); stroke(c, 1.5); }
+  if (apples && (se === 'so' || se === 'fr')) for (let i = 0; i < 7; i++) { const ax = x + (rr() - .5) * 100 * s, ay = y - (105 + rr() * 60) * s; if (se === 'so') { c.fillStyle = '#e03030'; c.beginPath(); c.arc(ax, ay, 6 * s, 0, 7); c.fill(); stroke(c, 2); c.fillStyle = 'rgba(255,255,255,.6)'; c.fillRect(ax - 2 * s, ay - 3 * s, 2 * s, 2 * s); } }
+}
+function house(c, x, y, w, h, se, o = {}) {
+  const P = PAL[se], wall = o.wall || '#f0d9a8', roof = o.roof || P.roof;
+  const sk = o.skew || 6;
+  poly(c, [[x, y], [x + sk, y - h], [x + w - sk, y - h - 4], [x + w, y]], wall, 3.5);
+  c.fillStyle = 'rgba(40,20,20,.15)'; c.beginPath(); c.moveTo(x + w * .7, y); c.lineTo(x + w * .68, y - h - 3); c.lineTo(x + w - sk, y - h - 4); c.lineTo(x + w, y); c.fill();
+  // Fachwerk
+  c.strokeStyle = '#6a3f22'; c.lineWidth = 5; c.lineCap = 'round';
+  for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x + w * i / 4 + sk * .5, y); c.lineTo(x + w * i / 4 + sk * .3, y - h); c.stroke(); }
+  c.beginPath(); c.moveTo(x + 3, y - h * .5); c.lineTo(x + w - 3, y - h * .52); c.stroke();
+  c.beginPath(); c.moveTo(x + w * .25, y - h * .5); c.lineTo(x + w * .5, y - h + 4); c.moveTo(x + w * .75, y - h * .5); c.lineTo(x + w * .5, y - h + 4); c.stroke();
+  poly(c, [[x - 18, y - h + 8], [x + w * .5 + 4, y - h - 62], [x + w + 20, y - h + 4], [x + w * .5, y - h + 20]], roof, 3.5);
+  c.fillStyle = 'rgba(20,10,30,.2)'; c.beginPath(); c.moveTo(x + w * .5 + 4, y - h - 62); c.lineTo(x + w + 20, y - h + 4); c.lineTo(x + w * .5, y - h + 20); c.fill();
+  c.strokeStyle = 'rgba(42,24,16,.45)'; c.lineWidth = 2; for (let i = 1; i < 4; i++) { c.beginPath(); c.moveTo(x - 18 + i * (w + 38) / 4 * .5, y - h + 8 - i * 10); c.lineTo(x + w * .5 + i * 8, y - h + 20 - i * 3); c.stroke(); }
+  if (se === 'wi') poly(c, [[x - 18, y - h + 8], [x + w * .5 + 4, y - h - 62], [x + w + 20, y - h + 4], [x + w + 10, y - h - 6], [x + w * .5, y - h - 44], [x - 8, y - h - 2]], '#fff', 3);
+  if (o.chimney !== false) { rrect(c, x + w * .72, y - h - 60, 20, 34, 2, '#a86a52', 3); if (se === 'wi') rrect(c, x + w * .72 - 2, y - h - 66, 24, 9, 4, '#fff', 2.5); }
+  if (o.door !== false) { const dx = x + w * (o.doorAt || .38); poly(c, [[dx, y], [dx, y - 58], [dx + 14, y - 68], [dx + 32, y - 58], [dx + 32, y]], '#8a5530', 3.5); c.fillStyle = '#f4c542'; c.beginPath(); c.arc(dx + 25, y - 30, 3, 0, 7); c.fill(); }
+  if (o.win !== false) { const wx = x + w * .72, wy = y - h * .74; rrect(c, wx, wy, 34, 30, 3, '#ffe9a0', 3); c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.moveTo(wx + 17, wy); c.lineTo(wx + 17, wy + 30); c.moveTo(wx, wy + 15); c.lineTo(wx + 34, wy + 15); c.stroke(); }
+}
+function barrel(c, x, y, s = 1) {
+  rrect(c, x - 20 * s, y - 44 * s, 40 * s, 46 * s, 12 * s, '#a86e38', 3.5);
+  c.strokeStyle = INK; c.lineWidth = 3; [[-14], [14]].forEach(a => { c.beginPath(); c.moveTo(x - 20 * s, y + a[0] * s - 20 * s); c.quadraticCurveTo(x, y + a[0] * s - 15 * s, x + 20 * s, y + a[0] * s - 20 * s); c.stroke(); });
+  c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 2; for (let i = -1; i <= 1; i++) { c.beginPath(); c.moveTo(x + i * 10 * s, y - 42 * s); c.lineTo(x + i * 10 * s, y); c.stroke(); }
+}
+function fence(c, x0, x1, y, se) {
+  const col = se === 'wi' ? '#efe6dc' : '#b58a58';
+  line(c, [[x0, y - 26], [x1, y - 30]], INK, 9); line(c, [[x0, y - 26], [x1, y - 30]], col, 5);
+  line(c, [[x0, y - 12], [x1, y - 15]], INK, 9); line(c, [[x0, y - 12], [x1, y - 15]], col, 5);
+  for (let x = x0; x <= x1; x += 44) { const t = ((x * 7) % 5) - 2; poly(c, [[x - 6, y + 2], [x - 5 + t, y - 40], [x + 1 + t, y - 46], [x + 6 + t, y - 40], [x + 6, y + 2]], col, 3); }
+}
+function ellip(c, x, y, rx, ry, fill, lw = 3) { c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, 7); if (fill) { c.fillStyle = fill; c.fill(); } stroke(c, lw); }
+function bush(c, x, y, s, se, seed) { const P = PAL[se]; blob(c, x - 18 * s, y - 14 * s, 22 * s, 18 * s, P.leaf2, seed, 3); blob(c, x + 14 * s, y - 16 * s, 24 * s, 19 * s, P.leaf, seed + 1, 3); blob(c, x, y - 24 * s, 20 * s, 18 * s, P.leaf, seed + 2, 3); }
+function glow(c, x, y, r, col, a) { const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col.replace('A', a)); g.addColorStop(1, col.replace('A', 0)); c.fillStyle = g; c.fillRect(x - r, y - r, r * 2, r * 2); }
+function flame(c, x, y, s, t) {
+  glow(c, x, y - 20 * s, 90 * s, 'rgba(255,170,60,A)', .5);
+  const f = (k, col, sc) => { const wob = Math.sin(t * 9 + k) * 3 * s; poly(c, [[x - 15 * s * sc, y], [x - 10 * s * sc + wob, y - 22 * s * sc], [x + wob * 1.5, y - 46 * s * sc - Math.sin(t * 11 + k) * 5 * s], [x + 10 * s * sc + wob, y - 22 * s * sc], [x + 15 * s * sc, y]], col, k === 0 ? 3 : 0); };
+  f(0, '#ff8a1e', 1); f(1, '#ffc830', .68); f(2, '#fff3a0', .36);
+}
+function smoke(c, x, y, t, col = 'rgba(230,230,235,.7)') { for (let i = 0; i < 6; i++) { const p = ((t * .35 + i / 6) % 1); c.fillStyle = col.replace(/[\d.]+\)$/, (0.7 * (1 - p)) + ')'); c.beginPath(); c.arc(x + Math.sin(p * 6 + i) * 10 + p * 14, y - p * 90, 8 + p * 18, 0, 7); c.fill(); } }
+
+/* ---------- Figuren ---------- */
+const CHAR = {
+  mira:   { skin: '#f8cfa8', hair: '#4a2a1a', style: 'pony', top: '#8a4fd0', bot: '#7a4a2a', boots: '#4a2a1a', skirt: true, satchel: true, sc: 1 },
+  runa:   { skin: '#dfa572', hair: '#c8501c', style: 'bun', top: '#e8801c', bot: '#5a3a2a', boots: '#3a2418', skirt: true, apron: true, sc: 1.02 },
+  tovin:  { skin: '#f0c090', hair: '#6a4a2a', style: 'short', top: '#e8a020', bot: '#4a5a8a', boots: '#5a3a20', cap: true, stache: '#6a4a2a', sc: 1 },
+  lio:    { skin: '#f2c8a0', hair: '#3a2a1a', style: 'braid', top: '#3a8ad0', bot: '#5a3a2a', boots: '#5a3a20', skirt: true, sc: .72 },
+  hedda:  { skin: '#e8b890', hair: '#cfcfd6', style: 'bun', top: '#b8563a', bot: '#6a4a3a', boots: '#3a2418', skirt: true, scarf: '#5aa0d8', sc: .92 }
+};
+function drawChar(c, x, y, ch, o = {}) {
+  const dir = o.dir || 1, ph = o.ph || 0, wk = o.walking, sc = (o.sc || 1) * ch.sc, tt = o.t || 0;
+  c.save(); c.translate(x, y); c.scale(dir * sc, sc);
+  const sw = wk ? Math.sin(ph) * 10 : 0, bob = wk ? -Math.abs(Math.sin(ph)) * 3.5 : Math.sin(tt * 2.2) * 1;
+  c.fillStyle = 'rgba(0,0,0,.24)'; c.beginPath(); c.ellipse(0, 3, 22, 5.5, 0, 0, 7); c.fill();
+  const leg = (dx, k) => { thick(c, [[dx, -30 + bob], [dx + k, -3]], ch.skirt ? ch.skin : ch.bot, 8); ellip(c, dx + k + 4, -2, 9, 5, ch.boots, 2.5); };
+  leg(-6, -sw); leg(6, sw);
+  if (ch.skirt) poly(c, [[-13, -28 + bob], [13, -28 + bob], [20, -10], [-20, -10]], ch.bot, 3);
+  // hinterer Arm
+  thick(c, [[-2, -60 + bob], [-sw * .8, -34 + bob]], ch.skin, 7);
+  rrect(c, -14, -68 + bob, 28, 42, 10, ch.top, 3.2);
+  c.fillStyle = 'rgba(20,10,30,.2)'; c.beginPath(); c.roundRect(2, -68 + bob, 12, 42, 8); c.fill();
+  if (ch.apron) poly(c, [[-9, -62 + bob], [9, -62 + bob], [12, -14], [-12, -14]], '#7a5a38', 2.8);
+  if (ch.satchel) { line(c, [[-13, -66 + bob], [13, -32 + bob]], INK, 6); line(c, [[-13, -66 + bob], [13, -32 + bob]], '#c98a3a', 3); rrect(c, 8, -40 + bob, 16, 14, 3, '#c98a3a', 2.5); }
+  if (ch.scarf) rrect(c, -13, -70 + bob, 26, 8, 4, ch.scarf, 2.5);
+  // vorderer Arm
+  thick(c, [[4, -60 + bob], [sw * .8 + 2, -34 + bob]], ch.skin, 7); ellip(c, sw * .8 + 2, -32 + bob, 4.5, 4.5, ch.skin, 2);
+  // Kopf
+  const hy = -84 + bob;
+  if (ch.style === 'pony') { blob(c, -14, hy + 6, 10, 18, ch.hair, 3, 3); }
+  if (ch.style === 'braid') { thick(c, [[-10, hy + 6], [-16, hy + 26], [-12, hy + 40]], ch.hair, 7); }
+  if (ch.style === 'bun') blob(c, -6, hy - 18, 10, 9, ch.hair, 4, 3);
+  blob(c, 0, hy, 17, 17, ch.skin, 8, 3.2, false);
+  c.fillStyle = ch.hair; c.beginPath(); c.arc(0, hy - 2, 18, Math.PI * 1.02, Math.PI * 1.92); c.lineTo(3, hy - 8); c.closePath(); c.fill(); stroke(c, 3);
+  if (ch.style === 'pony') { blob(c, -17, hy - 2, 6, 6, '#a060e0', 2, 2, false); }
+  if (ch.beard) blob(c, 8, hy + 14, 13, 12, ch.beard, 6, 2.5, false);
+  const hat = ch.cap ? 'cap' : ch.hat;
+  if (hat === 'cap') poly(c, [[-18, hy - 6], [-14, hy - 22], [6, hy - 26], [20, hy - 8], [26, hy - 4], [8, hy - 8]], '#c04a3a', 3);
+  if (hat === 'wiz' || hat === 'wiz2') { poly(c, [[-18, hy - 6], [-4, hy - (hat === 'wiz' ? 58 : 44)], [16, hy - 8], [26, hy - 4], [-26, hy - 3]], hat === 'wiz' ? '#3a4ab0' : '#2f8a48', 3); c.fillStyle = '#ffe28a'; c.beginPath(); c.arc(2, hy - 20, 3, 0, 7); c.fill(); }
+  if (hat === 'helm' || hat === 'miner') { c.beginPath(); c.arc(0, hy - 4, 19, Math.PI, 0); c.closePath(); c.fillStyle = hat === 'helm' ? '#9aa6b8' : '#e8c23a'; c.fill(); stroke(c, 3); if (hat === 'miner') ellip(c, 14, hy - 12, 4, 4, '#fff6b0', 2); else line(c, [[12, hy - 6], [12, hy + 4]], INK, 3); }
+  if (hat === 'crown') poly(c, [[-14, hy - 12], [-12, hy - 28], [-5, hy - 18], [0, hy - 30], [5, hy - 18], [12, hy - 28], [14, hy - 12]], '#f4c542', 2.8);
+  // Gesicht
+  const talk = o.talk ? (Math.sin(tt * 20) > 0) : false;
+  c.fillStyle = '#fff'; c.beginPath(); c.ellipse(7, hy + 1, 5.2, 6, 0, 0, 7); c.fill(); stroke(c, 2);
+  c.fillStyle = INK; c.beginPath(); c.arc(9, hy + 2, 2.6, 0, 7); c.fill();
+  c.strokeStyle = INK; c.lineWidth = 2.5; c.beginPath(); c.moveTo(3, hy - 9); c.quadraticCurveTo(8, hy - 11, 12, hy - 8); c.stroke();
+  c.beginPath(); c.moveTo(16, hy + 4); c.quadraticCurveTo(21, hy + 8, 16, hy + 9); c.stroke();
+  if (ch.stache) { blob(c, 10, hy + 11, 8, 3.5, ch.stache, 5, 2, false); }
+  c.strokeStyle = INK; c.lineWidth = 2.4; c.beginPath();
+  if (talk) { c.ellipse(9, hy + 13, 4, 3.4, 0, 0, 7); c.fillStyle = '#7a2a2a'; c.fill(); } else { c.moveTo(4, hy + 12); c.quadraticCurveTo(9, hy + 15, 14, hy + 11); }
+  c.stroke();
+  c.fillStyle = 'rgba(255,120,120,.35)'; c.beginPath(); c.arc(4, hy + 8, 4, 0, 7); c.fill();
+  if (ch.sword) { line(c, [[sw * .8 + 6, -30 + bob], [sw * .8 + 6, -80 + bob]], INK, 6); line(c, [[sw * .8 + 6, -30 + bob], [sw * .8 + 6, -80 + bob]], '#dfe6f0', 3); line(c, [[sw * .8, -34 + bob], [sw * .8 + 12, -34 + bob]], '#8a5a30', 4); }
+  c.restore();
+}
+
+/* ---------- Gegenstände ---------- */
+const ITEMS = {
+  seil: { n: 'Seil', e: '🪢', d: 'Ein festes Hanfseil aus Elias\' Kiste.' },
+  axt: { n: 'Axt', e: '🪓', d: 'Elias\' Axt. Taugt als Hebel und zum Graben.' },
+  herz: { n: 'Jahreszeitenherz', e: '💠', d: 'Elias\' Jahreszeitenherz. Der Ring sitzt schief, das Innere ist leer.', direct: true },
+  notizenNass: { n: 'Nasse Notizen', e: '📜', d: 'Elias\' Aufzeichnungen. Durchweicht – die Tinte ist kaum zu lesen.' },
+  notizen: { n: 'Elias\' Notizen', e: '📖', d: 'Getrocknet und lesbar. (Anklicken zum Lesen)', direct: true },
+  blueten: { n: 'Getrocknete Blüten', e: '💐', d: 'Eine kleine Vase mit getrockneten Frühlingsblüten aus Elias\' Herbarium.' },
+  phiole: { n: 'Leere Phiole', e: '🧪', d: 'Eine saubere, leere Glasphiole.' },
+  phioleSchnee: { n: 'Phiole mit Schnee', e: '🧊', d: 'Frischer Schnee in der Phiole.' },
+  phioleMisch: { n: 'Phiole mit Blüten', e: '🌸', d: 'Schnee und Blüten. Die Mischung braucht sanfte Wärme, um zu wirken.' },
+  essenz: { n: 'Blütenessenz', e: '✨', d: 'Eine leuchtende Blütenessenz. Sie pulsiert wie ein kleiner Frühling.' },
+  tuch: { n: 'Leinentuch', e: '🧻', d: 'Ein Leinentuch von der Wäscheleine. Steif gefroren.' },
+  holz: { n: 'Brennholz', e: '🪵', d: 'Trockene Scheite von unten aus dem Stapel.' },
+  kessel: { n: 'Kessel', e: '🫕', d: 'Ein kleiner gusseiserner Kessel.' },
+  kesselAsche: { n: 'Kessel mit Asche', e: '🪣', d: 'Der Kessel ist voll kalter, feiner Asche aus Runas Ofen.' },
+  fackel: { n: 'Fackel', e: '🏒', d: 'Eine Pechfackel. Nicht angezündet.' },
+  fackelLit: { n: 'Brennende Fackel', e: '🔥', d: 'Die Fackel brennt hell.' },
+  aepfel: { n: 'Äpfel', e: '🍎', d: 'Ein Korb voller Sommeräpfel.' },
+  oel: { n: 'Leinöl', e: '🛢️', d: 'Tovins Leinöl. Riecht nach Firnis.' },
+  holzNass: { n: 'Nasse Scheite', e: '🪵', d: 'Frisch gesägtes Holz, noch feucht vom Herbstnebel.' },
+  holzTrocken: { n: 'Trockene Scheite', e: '🧱', d: 'Knochentrockenes Holz. Perfekt für den Ofen.' },
+  flaschen: { n: 'Leere Flaschen', e: '🍾', d: 'Ein paar leere Flaschen von Tovins Fässern. Sie klirren bei jedem Schritt.' },
+  schluessel: { n: 'Scheunenschlüssel', e: '🗝️', d: 'Tovins schwerer Scheunenschlüssel. Etwas angelaufen.' },
+  kuerbis: { n: 'Kürbis', e: '🎃', d: 'Ein praller Herbstkürbis. Schwer – und er riecht nach Suppe.' },
+  stange: { n: 'Brechstange', e: '⛏️', d: 'Runas schwere Brechstange, gut zwei Meter lang. Mit dem richtigen Drehpunkt ein mächtiger Hebel.' },
+  zweig: { n: 'Apfelblütenzweig', e: '🌺', d: 'Ein blühender Zweig von Tovins Apfelbaum. Er duftet nach Frühling.' }
+};
+const COMBOS = [];      // [a,b,fn]
+function addCombo(a, b, fn) { COMBOS.push([a, b, fn]); }
+
+/* ---------- Spielzustand ---------- */
+function newState() { return { scene: 'lager', x: 150, dir: 1, flags: {}, inv: [], season: {}, unlocked: [], hasHeart: false, notes: [], hints: {}, visited: {}, insights: [], ring: [0, 0, 0, 0], ring2: [0, 0, 0, 0], girl: ['gelb', 'gruen', 'violett'], hain: [], playTime: 0, target: null }; }
+let S = newState();
+const F = k => !!S.flags[k], setF = (k, v = true) => { S.flags[k] = v; };
+const has = id => S.inv.includes(id);
+const seasonOf = id => S.season[id] || SC[id].natural;
+const curSeason = () => seasonOf(S.scene);
+
+/* ---------- UI-Zustand ---------- */
+let ui = 'title', busy = false, speech = null, choiceSt = null, sel = null, fade = 0, flash = 0, toast = null;
+let mouse = { x: 480, y: 270, in: false }, hover = null, barShown = false, barSuppress = false, showHot = false;
+let btns = [], hint = '';
+let sound = true;
+
+const sleep = ms => AUTO ? Promise.resolve() : new Promise(r => setTimeout(r, ms));
+const frame = () => new Promise(r => requestAnimationFrame(r));
+function say(who, text) {
+  if (AUTO) return Promise.resolve();
+  return new Promise(res => { speech = { who, text, t0: now(), res }; sfx('talk'); });
+}
+const narr = t => say('n', t);
+function choice(opts) {
+  if (AUTO) return Promise.resolve(window.__choose ? window.__choose(opts) : 0);
+  return new Promise(res => { choiceSt = { opts, res }; });
+}
+function showToast(t) { toast = { t, t0: now() }; }
+function note(t) { if (!S.notes.includes(t)) { S.notes.push(t); showToast('📓 Neue Notiz im Tagebuch'); } }
+function insight(t) { if (!S.insights.includes(t)) { S.insights.push(t); S.notes.push('💡 Einsicht: ' + t); showToast('💡 Neue Einsicht (' + S.insights.length + '/12)'); sfx('success'); } }
+function give(id, silent) { if (!has(id)) S.inv.push(id); sfx('pick'); barSuppress = true; if (!silent) showToast('Erhalten: ' + ITEMS[id].n); }
+function take(id) { S.inv = S.inv.filter(i => i !== id); if (sel === id) sel = null; }
+function swap(a, b) { take(a); give(b, true); }
+
+/* ---------- Ton (WebAudio, live synthetisiert) ---------- */
+let ac = null, musicTimer = null, mstep = 0;
+function initAudio() { if (ac) return; try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ac = null; } }
+function beep(f, d, type = 'triangle', v = .07, w = 0) {
+  if (!ac || !sound) return; const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f;
+  const t = ac.currentTime + w; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .015); g.gain.exponentialRampToValueAtTime(.0001, t + d); o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + d + .05);
+}
+function sfx(n) {
+  if (n === 'pick') { beep(660, .12, 'square', .05); beep(990, .14, 'square', .05, .08); }
+  else if (n === 'use') { beep(330, .1, 'square', .05); beep(440, .12, 'square', .05, .07); }
+  else if (n === 'fail') { beep(200, .2, 'sawtooth', .05); beep(150, .25, 'sawtooth', .05, .12); }
+  else if (n === 'success') { [523, 659, 784, 1046].forEach((f, i) => beep(f, .3, 'triangle', .07, i * .09)); }
+  else if (n === 'season') { [392, 494, 587, 784, 988].forEach((f, i) => beep(f, .5, 'sine', .06, i * .07)); }
+  else if (n === 'talk') { beep(300 + Math.random() * 120, .05, 'square', .025); }
+  else if (n === 'click') { beep(800, .04, 'square', .03); }
+  else if (n === 'fire') { beep(90, .3, 'sawtooth', .04); }
+}
+const SCALES = { fr: [0, 2, 4, 7, 9, 12], so: [0, 2, 4, 7, 9, 14], he: [0, 3, 5, 7, 10, 12], wi: [0, 3, 7, 8, 12, 15] };
+function startMusic() {
+  if (musicTimer) return; initAudio();
+  musicTimer = setInterval(() => {
+    if (!ac || !sound || ui === 'title' && false) return; const se = ui === 'title' ? 'so' : curSeason(), sc = SCALES[se]; mstep++;
+    const base = { fr: 262, so: 294, he: 220, wi: 196 }[se];
+    if (mstep % 2 === 0) { const n = sc[(mstep * 7 + (mstep >> 2) * 3) % sc.length]; beep(base * Math.pow(2, n / 12), .5, se === 'wi' ? 'sine' : 'triangle', .035); }
+    if (mstep % 8 === 0) beep(base / 2 * Math.pow(2, sc[(mstep >> 3) % 3] / 12), 1.4, 'sine', .05);
+  }, se0());
+}
+function se0() { return 340; }
+
+/* ---------- Standard-Fehltexte ---------- */
+const FAILS = ['Das bringt mich nicht weiter.', 'Netter Versuch. Aber nein.', 'Das passt ungefähr so gut zusammen wie Schnee und Sonnenbrand.', 'Ich glaube nicht, dass das so gedacht war.', 'Hm. Nein. Ganz sicher nicht.', 'Das würde nur Ärger geben – und ich habe schon genug davon.'];
+const FAIL_SPECIAL = {
+  'seil|runa': 'Runa sieht aus, als würde sie mich gleich damit fesseln.',
+  'aepfel|scarecrow': 'Sie hat keinen Hunger. Sie ist aus Stroh.',
+  'axt|runa': 'Ich rede lieber mit Runa, statt ihr eine Axt zu zeigen. Sie hat größere.',
+  'axt|tovin': 'Tovin weicht einen Schritt zurück. "Ich hab schon genug Kleinholz, danke."'
+};
+let failIdx = 0;
+async function failItem(item, o) {
+  sfx('fail');
+  await say('mira', FAIL_SPECIAL[item + '|' + (o.actor || o.id)] || FAILS[(failIdx++) % FAILS.length]);
+}
+
+/* =====================================================================
+   SZENEN
+   ===================================================================== */
+const SC = {};
+
+/* ----- Hilfen für Ausgänge ----- */
+function edgeExit(side, target, name, toX, cond, blocked) {
+  const L = side === 'l';
+  return {
+    id: 'exit_' + target, name, exit: target, toX, cond, blocked,
+    r: L ? [0, 300, 70, 190] : [W - 70, 300, 70, 190], walk: L ? 24 : W - 24, front: true, kind: 'exit', dirArrow: L ? -1 : 1,
+    draw(c, t) {
+      const x = L ? 30 : W - 30, y = GY + 4; const d = L ? -1 : 1;
+      rrect(c, x - 5, y - 92, 10, 96, 3, '#8a5a30', 3);
+      const ok = !cond || cond();
+      poly(c, [[x - d * 44, y - 90], [x + d * 26, y - 90], [x + d * 44, y - 76], [x + d * 26, y - 62], [x - d * 44, y - 62]], ok ? '#e2b060' : '#b89a78', 3);
+      c.fillStyle = INK; c.beginPath(); c.moveTo(x + d * 30, y - 76); c.lineTo(x + d * 12, y - 84); c.lineTo(x + d * 12, y - 68); c.fill();
+      c.fillStyle = INK; c.fillRect(x - d * 38 - (L ? 0 : 0), y - 80, 3, 3);
+    }
+  };
+}
+function archExit(target, name, x, y, toX, cond, blocked, w = 90) {
+  return {
+    id: 'exit_' + target, name, exit: target, toX, cond, blocked, kind: 'exit', dirArrow: 0,
+    r: [x - w / 2, y - 120, w, 130], walk: x,
+    draw(c, t) {
+      poly(c, [[x - w / 2, y], [x - w / 2 + 3, y - 92], [x - w / 2 + 14, y - 100], [x + w / 2 - 14, y - 100], [x + w / 2 - 3, y - 92], [x + w / 2, y]], '#3a2a3a', 3.5);
+      c.fillStyle = 'rgba(20,10,30,.85)'; c.beginPath(); c.roundRect(x - w / 2 + 12, y - 88, w - 24, 90, [30, 30, 0, 0]); c.fill();
+      rrect(c, x - w / 2 - 8, y - 110, 16, 118, 3, '#9a6a3a', 3.5); rrect(c, x + w / 2 - 8, y - 110, 16, 118, 3, '#9a6a3a', 3.5);
+      c.beginPath(); c.moveTo(x - w / 2 - 12, y - 104); c.quadraticCurveTo(x, y - 140, x + w / 2 + 12, y - 104); c.lineWidth = 12; c.strokeStyle = INK; c.stroke(); c.lineWidth = 7; c.strokeStyle = '#b07a44'; c.stroke();
+      rrect(c, x - 34, y - 132, 68, 22, 4, '#e2b060', 3); txt(c, name.length > 11 ? name.slice(0, 10) + '…' : name, x, y - 116, 13, INK, 'center', true, false);
+    }
+  };
+}
+
+/* ======================= LAGER ======================= */
+SC.lager = {
+  id: 'lager', title: 'Verlassenes Lager', natural: 'wi', minX: 50, maxX: 880, startX: 330,
+  land(c, P, se) {
+    mountains(c, P, 250, 11, P.mtn, se !== 'he');
+    groundBase(c, P, se);
+    const r = R(21);
+    for (let i = 0; i < 16; i++) pine(c, 40 + i * 60 + r() * 30, 372 + r() * 24, .55 + r() * .25, se, i + 3);
+    pine(c, 60, 470, 1.25, se, 41); pine(c, 900, 462, 1.1, se, 42); pine(c, 25, 500, 1.55, se, 43);
+    // Fußspuren-Fleck
+    if (se === 'wi') { c.fillStyle = 'rgba(100,140,190,.18)'; c.beginPath(); c.ellipse(560, 498, 160, 8, 0, 0, 7); c.fill(); }
+  },
+  objs() {
+    const se = curSeason(), snow = se === 'wi';
+    const list = [];
+    list.push({
+      id: 'stump', name: 'Baumstumpf', r: [95, 400, 100, 80], walk: 170, face: -1,
+      draw(c) {
+        poly(c, [[105, 470], [110, 430], [190, 428], [196, 470]], '#8a5a30', 3.5);
+        ellip(c, 150, 428, 44, 13, '#d9a868', 3.5); c.strokeStyle = 'rgba(90,50,20,.6)'; c.lineWidth = 2; c.beginPath(); c.ellipse(150, 428, 26, 7, 0, 0, 7); c.stroke(); c.beginPath(); c.ellipse(150, 428, 10, 3, 0, 0, 7); c.stroke();
+        if (snow) blob(c, 150, 424, 38, 9, '#fff', 3, 2.5, false);
+        if (!F('axtHat')) { thick(c, [[150, 428], [166, 372]], '#a87038', 7); poly(c, [[160, 380], [188, 370], [192, 388], [164, 396]], '#a8b4c0', 3); }
+      },
+      look: async () => say('mira', F('axtHat') ? 'Ein alter Baumstumpf. Er hat schon bessere Tage gesehen – und bessere Äxte.' : 'Elias\' Axt steckt tief im Stumpf. Eingefroren! Ich brauche einen Hebel oder Zugkraft.'),
+      use: async () => say('mira', F('axtHat') ? 'Ein Stumpf. Zum Sitzen zu kalt.' : 'Ich ziehe daran, aber die Axt sitzt fest. Meine Finger sind schon blau.'),
+      items: {
+        seil: async () => {
+          if (F('axtHat')) return say('mira', 'Die Axt habe ich schon.');
+          await say('mira', 'Seil um den Griff, Fuß gegen den Stumpf … und ZIEH!');
+          sfx('use'); setF('axtHat'); give('axt'); await say('mira', 'Geschafft! Das Seil behalte ich – man kann nie wissen.');
+        }
+      }
+    });
+    list.push({
+      id: 'kiste', name: 'Kiste', r: [200, 428, 84, 52], walk: 245, face: 1,
+      draw(c) {
+        rrect(c, 204, 440, 76, 38, 4, '#9a6534', 3.5); c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.moveTo(230, 440); c.lineTo(230, 478); c.moveTo(254, 440); c.lineTo(254, 478); c.stroke();
+        if (F('kisteAuf')) { poly(c, [[204, 440], [208, 410], [278, 406], [280, 440]], '#b07a44', 3.5); c.fillStyle = '#1a0e08'; c.fillRect(210, 442, 64, 8); }
+        else { rrect(c, 201, 424, 82, 20, 6, '#b8803e', 3.5); rrect(c, 236, 430, 12, 12, 2, '#f4c542', 2.5); }
+        if (snow) blob(c, 242, 424, 40, 7, '#fff', 8, 2.5, false);
+      },
+      look: async () => say('mira', F('kisteAuf') ? 'Elias\' Kiste. Jetzt offen und ziemlich leer.' : 'Elias\' Vorratskiste. Der Deckel ist zugefroren, aber nicht abgeschlossen.'),
+      use: async () => {
+        if (F('kisteAuf')) return say('mira', 'Nur noch Staub und Eiszapfen.');
+        await say('mira', 'Ich klopfe das Eis vom Deckel …'); sfx('use'); setF('kisteAuf'); give('seil'); await say('mira', 'Ein festes Hanfseil! Genau das, was ich brauche.');
+      }
+    });
+    if (!F('tuchWeg')) list.push({
+      id: 'leine', name: 'Wäscheleine', r: [310, 330, 130, 130], walk: 375,
+      draw(c, t) {
+        rrect(c, 312, 340, 9, 132, 2, '#8a5a30', 3); rrect(c, 430, 340, 9, 132, 2, '#8a5a30', 3);
+        line(c, [[316, 346], [375, 364], [434, 346]], INK, 3);
+        const stiff = snow || true; poly(c, [[340, 356], [372, 366], [400, 358], [402, 402], [372, 412], [342, 402]], '#f0ede4', 3);
+        c.strokeStyle = 'rgba(120,150,190,.5)'; c.lineWidth = 2; c.beginPath(); c.moveTo(350, 372); c.lineTo(352, 396); c.moveTo(372, 374); c.lineTo(372, 402); c.moveTo(392, 370); c.lineTo(390, 394); c.stroke();
+        if (snow) { for (let i = 0; i < 4; i++) { c.fillStyle = '#dff0ff'; poly(c, [[350 + i * 14, 402], [354 + i * 14, 414], [358 + i * 14, 402]], '#dff0ff', 2); } }
+      },
+      look: async () => say('mira', 'Ein Leinentuch, so steif gefroren, dass es fast stehen könnte.'),
+      use: async () => { setF('tuchWeg'); give('tuch'); await say('mira', 'Es knackt beim Abnehmen wie ein Keks. Ich nehme es mit.'); }
+    });
+    list.push({
+      id: 'zelt', name: 'Elias\' Zelt', r: [470, 340, 190, 135], walk: 560, face: 1,
+      draw(c) {
+        const open = F('zeltAuf');
+        poly(c, [[470, 474], [550, 344], [660, 474]], '#c9863a', 3.8);
+        poly(c, [[550, 344], [660, 474], [590, 474]], 'rgba(20,10,30,.2)', 0);
+        poly(c, [[522, 474], [552, 384], [580, 474]], open ? '#241018' : '#a8672c', 3.5);
+        if (!open) { line(c, [[537, 470], [566, 430], [545, 400]], '#d8b070', 3); line(c, [[550, 424], [566, 474]], '#d8b070', 3); }
+        else { poly(c, [[522, 474], [552, 384], [520, 440]], '#d8944a', 3); }
+        line(c, [[550, 344], [550, 322]], INK, 4); poly(c, [[550, 322], [582, 330], [550, 338]], '#d04848', 2.5);
+        line(c, [[470, 474], [440, 480]], INK, 2.5); line(c, [[660, 474], [692, 482]], INK, 2.5);
+        if (snow) { poly(c, [[550, 344], [598, 412], [588, 408], [572, 424], [552, 398], [530, 424], [510, 408], [500, 414]], '#fff', 3); }
+      },
+      look: async () => say('mira', F('zeltAuf') ? 'Elias\' Zelt. Innen ist alles durchwühlt – ich habe genommen, was brauchbar war.' : 'Elias\' Zelt. Die Klappe ist mit einem eingefrorenen Knoten verschnürt. Mit bloßen Fingern hoffnungslos.'),
+      use: async () => say('mira', F('zeltAuf') ? 'Da ist nichts mehr, außer Elias\' Socken. Nein danke.' : 'Der Knoten ist steinhart. Ich brauche etwas zum Hebeln.'),
+      items: {
+        axt: async () => {
+          if (F('zeltAuf')) return say('mira', 'Das Zelt ist doch schon offen.');
+          await say('mira', 'Die Axt als Hebel unter den Knoten … und – KRACK!'); sfx('use'); setF('zeltAuf');
+          await say('mira', 'Drinnen liegt ein Bündel mit Elias\' Sachen.');
+          give('herz'); give('notizenNass'); give('blueten'); give('phiole');
+          await say('mira', 'Das Jahreszeitenherz! Dazu nasse Notizen, getrocknete Blüten und eine leere Phiole.');
+          await say('mira', 'Der Ring am Herz sitzt schief. Und das Innere ist leer … Ich muss es erst einmal genauer ansehen.');
+        }
+      }
+    });
+    if (!F('fackelWeg')) list.push({
+      id: 'fackel', name: 'Fackel', r: [668, 400, 34, 76], walk: 690,
+      draw(c) { thick(c, [[684, 470], [690, 412]], '#8a5a30', 7); poly(c, [[680, 414], [700, 414], [696, 396], [684, 396]], '#3a2a2a', 3); },
+      look: async () => say('mira', 'Eine Pechfackel, an den Zeltrand gelehnt.'),
+      use: async () => { setF('fackelWeg'); give('fackel'); await say('mira', 'Eine Fackel. Nicht angezündet – noch nicht.'); }
+    });
+    if (!F('kesselWeg')) list.push({
+      id: 'kessel', name: 'Kessel', r: [706, 440, 50, 40], walk: 730,
+      draw(c) { blob(c, 730, 462, 22, 16, '#3a3a44', 6, 3.5); ellip(c, 730, 450, 18, 5, '#1a1a20', 2.5); line(c, [[710, 452], [730, 434], [750, 452]], INK, 3); },
+      look: async () => say('mira', 'Ein kleiner gusseiserner Kessel. Schwer, aber nützlich.'),
+      use: async () => { setF('kesselWeg'); give('kessel'); await say('mira', 'Der Kessel kommt mit. Irgendwer muss ja kochen.'); }
+    });
+    list.push({
+      id: 'feuer', name: 'Feuerstelle', r: [745, 440, 70, 40], walk: 780, face: -1,
+      draw(c, t) {
+        for (let i = 0; i < 7; i++) { const a = i / 7 * 6.28; blob(c, 780 + Math.cos(a) * 30, 466 + Math.sin(a) * 9, 10, 8, '#9a9aa4', 30 + i, 3); }
+        if (F('feuer')) { flame(c, 780, 464, 1.2, t); c.fillStyle = 'rgba(60,30,20,.9)'; c.fillRect(764, 458, 32, 6); smoke(c, 780, 420, t); } else { blob(c, 780, 464, 20, 5, '#3a2a2a', 9, 2, false); }
+      },
+      look: async () => say('mira', F('feuer') ? 'Das Feuer knistert. Endlich etwas Wärme.' : 'Eine Feuerstelle aus Steinen. Kalte Asche, sonst nichts.'),
+      use: async () => say('mira', F('feuer') ? 'Autsch. Heiß. Ich lasse es lieber brennen.' : 'Ohne Holz brennt hier gar nichts.'),
+      items: {
+        holz: async () => { if (F('feuer')) return say('mira', 'Es brennt schon.'); take('holz'); setF('feuer'); sfx('fire'); await say('mira', 'Holz auf die Asche, ein Funke vom Schlageisen … und es brennt! Ein Feuer im Winter – das ist echter Luxus.'); },
+        fackel: async () => { if (!F('feuer')) return say('mira', 'Erst brauche ich ein Feuer.'); swap('fackel', 'fackelLit'); sfx('fire'); await say('mira', 'Die Fackel fängt Feuer. Flammen zum Mitnehmen!'); },
+        phioleMisch: async () => {
+          if (!F('feuer')) return say('mira', 'Ohne Feuer keine Wärme.');
+          await say('mira', 'Ich halte die Phiole vorsichtig über die Flammen … Nicht kochen, nur sanft erwärmen …'); await sleep(600);
+          swap('phioleMisch', 'essenz'); sfx('success'); await say('mira', 'Die Mischung leuchtet! Blütenessenz – wie ein kleiner Frühling im Glas.');
+        }
+      }
+    });
+    list.push({
+      id: 'dreibein', name: 'Dreibein', r: [732, 350, 96, 90], walk: 700, face: 1,
+      draw(c, t) {
+        line(c, [[726, 452], [780, 372]], INK, 8); line(c, [[726, 452], [780, 372]], '#8a5a30', 4);
+        line(c, [[834, 452], [780, 372]], INK, 8); line(c, [[834, 452], [780, 372]], '#8a5a30', 4);
+        line(c, [[780, 372], [780, 452]], INK, 8); line(c, [[780, 372], [780, 452]], '#a06a38', 4);
+        if (F('tuchSpann')) {
+          poly(c, [[750, 400], [780, 386], [812, 400], [810, 414], [780, 424], [752, 414]], '#f0ede4', 3);
+          if (F('notizenAuf')) rrect(c, 762, 396, 36, 14, 2, '#e8d7a8', 2.5);
+          else if (F('notizenLiegen')) rrect(c, 762, 396, 36, 14, 2, '#8a8a7a', 2.5);
+        }
+      },
+      look: async () => say('mira', F('tuchSpann') ? 'Das Tuch hängt über dem Dreibein – im Wärmeschein des Feuers.' : 'Ein hölzernes Dreibein über der Feuerstelle. Da könnte man etwas aufspannen.'),
+      use: async () => { if (F('tuchSpann') && (F('notizenAuf') || !has('notizenNass')) && !F('tuchZurueck')) { setF('tuchZurueck'); setF('tuchSpann', false); give('tuch'); return say('mira', 'Das Tuch ist getrocknet und weich. Ich nehme es vom Dreibein – als Flicken könnte es noch nützlich sein.'); } await say('mira', 'Ich rüttle daran. Es steht.'); },
+      items: {
+        tuch: async () => { if (F('tuchSpann')) return; take('tuch'); setF('tuchSpann'); sfx('use'); await say('mira', 'Ich spanne das Tuch übers Dreibein. Es taut schon in der Wärme auf.'); },
+        notizenNass: async () => {
+          if (!F('tuchSpann')) return say('mira', 'Ich brauche eine Unterlage – und Wärme.');
+          if (!F('feuer')) return say('mira', 'Ohne Feuer trocknen die Notizen nie.');
+          take('notizenNass'); setF('notizenLiegen'); await say('mira', 'Ich lege die Seiten vorsichtig aufs Tuch …'); await sleep(700);
+          setF('notizenLiegen', false); setF('notizenAuf'); give('notizen'); sfx('success'); await say('mira', 'Trocken und lesbar! Elias\' Handschrift ist wie eh und je: unmöglich, aber lesbar.');
+          await readNotes();
+        }
+      }
+    });
+    if (!F('holzWeg')) list.push({
+      id: 'holzstapel', name: 'Holzstapel', r: [805, 410, 80, 70], walk: 850, face: -1,
+      draw(c) {
+        for (let r = 0; r < 3; r++) for (let i = 0; i < 4 - (r > 1 ? 1 : 0); i++) { const x = 818 + i * 17 + r * 8, y = 470 - r * 16; ellip(c, x, y, 9, 8, '#c08850', 2.8); c.strokeStyle = 'rgba(90,50,20,.6)'; c.lineWidth = 1.5; c.beginPath(); c.arc(x, y, 4, 0, 7); c.stroke(); }
+        if (snow) blob(c, 845, 412, 42, 8, '#fff', 12, 2.5, false);
+      },
+      look: async () => say('mira', 'Ein Stapel Brennholz. Oben schneebedeckt, unten trocken – so wie Elias es immer machte.'),
+      use: async () => { setF('holzWeg'); give('holz'); await say('mira', 'Trockene Scheite von ganz unten. Elias, du Genie.'); }
+    });
+    if (snow) list.push({
+      id: 'schneewehe', name: 'Schneewehe', r: [880, 380, 80, 110], walk: 850, face: 1,
+      draw(c) { blob(c, 918, 450, 64, 44, '#fff', 14, 3.5); blob(c, 895, 470, 40, 22, '#eaf4ff', 15, 3, false); c.fillStyle = 'rgba(120,150,200,.25)'; c.beginPath(); c.ellipse(930, 470, 40, 16, 0, 0, 7); c.fill(); },
+      look: async () => say('mira', 'Eine mannshohe Schneewehe versperrt den Weg ins Dorf. Ohne Frühling komme ich hier nie durch.'),
+      use: async () => say('mira', 'Ich buddle ein bisschen. Das macht die Wehe nur noch breiter.'),
+      items: {
+        phiole: async () => { swap('phiole', 'phioleSchnee'); sfx('use'); await say('mira', 'Frischer, sauberer Schnee in der Phiole.'); },
+        axt: async () => say('mira', 'Ich hacke ein bisschen – der Schnee lacht nur. Es sind Tonnen davon.')
+      }
+    });
+    list.push(edgeExit('r', 'dorf', 'Zum Dorfplatz', 120, () => curSeason() !== 'wi', 'Die Schneewehe versperrt den Weg. Ich müsste den Winter loswerden …'));
+    return list;
+  },
+  async onEnter() { if (!F('introLager')) { setF('introLager'); await say('mira', 'Das Lager ist verlassen. Elias\' Zelt, sein Kochtopf … und überall Schnee. Mitten im Herbst!'); await say('mira', 'Elias, wo steckst du nur? Ich muss herausfinden, was hier passiert ist.'); } },
+  async onSeason(n, o) { if (n !== 'wi' && !F('weg')) { setF('weg'); sfx('success'); await say('mira', 'Der Schnee schmilzt in Rekordzeit! Der Weg ins Dorf ist frei.'); } }
+};
+
+/* ======================= DORF ======================= */
+SC.dorf = {
+  id: 'dorf', title: 'Dorfplatz', natural: 'he', minX: 50, maxX: 890, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 240, 5, P.mtn, se !== 'he');
+    groundBase(c, P, se);
+    house(c, 60, 470, 230, 120, se, { doorAt: .55 });
+    // Scheune
+    poly(c, [[300, 440], [304, 358], [376, 340], [388, 440]], '#a8482c', 3.5); poly(c, [[292, 364], [342, 312], [396, 342]], P.roof, 3.5);
+    poly(c, [[326, 440], [330, 392], [364, 384], [366, 440]], '#6a3a20', 3);
+    line(c, [[330, 440], [366, 392]], INK, 3); line(c, [[366, 440], [330, 392]], INK, 3);
+    if (se === 'wi') poly(c, [[292, 364], [342, 312], [396, 342], [388, 340], [342, 324], [300, 362]], '#fff', 3);
+    // Brunnen
+    rrect(c, 500, 418, 60, 34, 8, '#9a9aa8', 3.5); poly(c, [[504, 418], [508, 372], [558, 372], [556, 418]], 'rgba(0,0,0,0)', 0);
+    line(c, [[506, 420], [506, 376]], INK, 7); line(c, [[554, 420], [554, 376]], INK, 7); line(c, [[506, 420], [506, 376]], '#8a5a30', 4); line(c, [[554, 420], [554, 376]], '#8a5a30', 4);
+    poly(c, [[496, 380], [530, 356], [564, 380]], P.roof, 3.5);
+    tree(c, 30, 432, .6, se, 71); tree(c, 900, 430, .7, se, 72);
+    bush(c, 470, 436, .8, se, 5);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push({
+      id: 'haus', name: 'Tovins Haus', r: [80, 340, 220, 130], walk: 255, face: -1,
+      draw() { }, look: async () => say('mira', 'Tovins Haus und Scheune. Schief wie ein Hut auf Sturm – aber gemütlich.'),
+      use: async () => { if (F('scheuneAuf')) return say('mira', 'Die Scheune steht offen. Ich habe, was ich brauche.'); await say('mira', 'Das Scheunentor ist fest verschlossen. Ohne Schlüssel keine Chance.'); },
+      items: {
+        schluessel: async () => {
+          if (F('scheuneAuf')) return;
+          if (!F('oelDeal')) return say('mira', 'Der Schlüssel passt! Aber ohne Tovins Erlaubnis wühle ich hier nicht herum.');
+          take('schluessel'); setF('scheuneAuf'); sfx('use'); await say('mira', 'Klick – das Schloss gibt nach. Drinnen stehen Fässer und Werkzeug … und da: Tovins Leinöl!');
+          give('oel'); await say('mira', 'Das Öl gehört mir – ehrlich verdient mit Äpfeln.');
+        }
+      }
+    });
+    list.push({
+      id: 'tovin', actor: 'tovin', name: 'Tovin', r: [395, 360, 70, 112], walk: 350, face: 1, head: [430, 356],
+      draw(c, t) { drawChar(c, 430, 470, CHAR.tovin, { dir: -1, t, talk: speech && speech.who === 'tovin' }); },
+      look: async () => say('mira', 'Tovin, Müller und Bastler. Ein Mann, der aus jedem Schrott einen Plan baut.'),
+      use: async () => tovinTalk()
+    });
+    list.push({
+      id: 'lio', actor: 'lio', name: 'Lio', r: [575, 390, 50, 82], walk: 545, face: 1, head: [600, 396],
+      draw(c, t) { drawChar(c, 600, 470, CHAR.lio, { dir: -1, t, talk: speech && speech.who === 'lio' }); },
+      look: async () => say('mira', 'Lio, ein aufgewecktes Kind mit Zöpfen und großen Ohren. Es sieht garantiert alles.'),
+      use: async () => lioTalk()
+    });
+    list.push({
+      id: 'apfelbaum', name: 'Apfelbaum', r: [730, 190, 190, 285], walk: 770, face: 1,
+      draw(c, t) { tree(c, 830, 470, 1.25, se, 60, true); },
+      look: async () => say('mira', { fr: 'Der Apfelbaum steht in voller Blüte. Ein Zweig davon wäre eine Zier.', so: F('apfelWeg') ? 'Die Äpfel sind abgeerntet.' : 'Der Apfelbaum hängt voller praller, roter Sommeräpfel.', he: 'Nur noch Fallobst voller Wespen. Keine Chance.', wi: 'Kahl und still. Der Apfelbaum schläft.' }[se]),
+      use: async () => {
+        if (se === 'so' && !F('apfelWeg')) { setF('apfelWeg'); give('aepfel'); await say('mira', 'Ich pflücke einen ganzen Korb voll. Einer landet zur Probe im Mund – köstlich!'); return; }
+        await say('mira', { fr: 'Nur Blüten. Die Äpfel kommen später.', so: 'Ich habe genug Äpfel gepflückt.', he: 'Das Fallobst gehört den Wespen.', wi: 'Nichts als kahle Äste.' }[se]);
+      },
+      items: { axt: async () => { if (se !== 'fr') return say('mira', 'Ich hacke am Baum herum – und ernte nichts als einen bösen Blick von Tovin.'); if (F('zweigWeg')) return say('mira', 'Ein Zweig reicht.'); setF('zweigWeg'); give('zweig'); await say('mira', 'Ein sauberer Schnitt – ein blühender Apfelblütenzweig. Der duftet nach Frühling.'); } }
+    });
+    if (se === 'he' && !F('kuerbisWeg')) list.push({
+      id: 'kuerbisBeet', name: 'Kürbis', r: [605, 436, 60, 40], walk: 640,
+      draw(c) { blob(c, 632, 462, 22, 16, '#f08a20', 22, 3.5); c.strokeStyle = 'rgba(120,50,0,.6)'; c.lineWidth = 2; c.beginPath(); c.moveTo(632, 447); c.quadraticCurveTo(622, 462, 632, 478); c.moveTo(632, 447); c.quadraticCurveTo(642, 462, 632, 478); c.stroke(); rrect(c, 629, 440, 6, 9, 2, '#5a8a30', 2.5); },
+      look: async () => say('mira', 'Ein praller Herbstkürbis. Schwer – und er riecht nach Suppe.'),
+      use: async () => { setF('kuerbisWeg'); give('kuerbis'); await say('mira', 'Ein Kürbis! Der wird später sicher noch nützlich.'); }
+    });
+    if (!F('flaschenWeg')) list.push({
+      id: 'faesser', name: 'Fässer', r: [320, 405, 72, 70], walk: 330, face: 1,
+      draw(c) { barrel(c, 340, 470, 1); barrel(c, 372, 472, .85); if (se === 'wi') blob(c, 340, 428, 20, 5, '#fff', 3, 2, false); c.fillStyle = '#7ac07a'; c.beginPath(); c.roundRect(388, 452, 8, 20, 3); c.fill(); stroke(c, 2); },
+      look: async () => say('mira', 'Ein paar Fässer – und daneben leere Flaschen. Tovin hat offenbar schon getestet, was drin war.'),
+      use: async () => { setF('flaschenWeg'); give('flaschen'); await say('mira', 'Die leeren Flaschen klirren bei jedem Schritt. Ich nehme sie mit. Man weiß nie.'); }
+    });
+    list.push({
+      id: 'brunnen', name: 'Brunnen', r: [495, 355, 75, 100], walk: 530,
+      draw() { }, look: async () => say('mira', 'Der Dorfbrunnen. Das Wasser ist bestimmt kälter als mein Humor.'), use: async () => say('mira', 'Ich schaue hinein. Ein müdes Gesicht schaut zurück. Nein, danke.')
+    });
+    list.push(archExit('feld', 'Feldweg', 690, 448, 120, null, null, 84));
+    list.push(edgeExit('l', 'lager', 'Zum Lager', 850, null));
+    list.push(edgeExit('r', 'werkstatt', 'Zur Werkstatt', 330, null));
+    return list;
+  },
+  async onEnter() { if (!F('introDorf')) { setF('introDorf'); await say('mira', 'Der Dorfplatz. Kaum jemand zu sehen – nur ein Bastler und ein Kind. Vielleicht wissen die etwas.'); } }
+};
+async function tovinTalk() {
+  if (!F('tovinMet')) { setF('tovinMet'); await say('tovin', 'Ah! Eine Fremde! Ich bin Tovin, Müller und Bastler. Die Mühle steht still, aber mein Kopf nie.'); await say('mira', 'Ich bin Mira, Alchemistin. Ich suche meinen Lehrmeister Elias.'); await say('tovin', 'Elias? Der ist in den Wald hinaus, glaube ich. Frag mich nicht wann. Zeit ist hier ein … flexibles Konzept.'); }
+  await talkLoop([
+    { t: 'Kannst du mir helfen? Ich brauche Öl.', show: () => !F('oelDeal'), fn: async () => {
+      if (!has('aepfel')) { setF('oelAsked'); await say('tovin', 'Leinöl? Steht in meiner Scheune. Aber ich habe Hunger auf Äpfel! Bring mir einen Korb Sommeräpfel vom Baum und wir reden.'); await say('mira', 'Der Baum ist gerade nicht in Sommerlaune. Ich muss mir etwas einfallen lassen.'); }
+      else { take('aepfel'); setF('oelDeal'); await say('tovin', 'Äpfel! Und was für welche! Das Öl gehört dir – aber die Scheune ist zu, und der Schlüssel …'); await say('tovin', '… den hat Lio im Erntefeld verloren. Frag sie.'); insight('Eine Mühle braucht Wind aus vielen Richtungen – wer alles bündelt, erntet Stillstand.'); note('Tovin gibt mir sein Leinöl, sobald ich die Scheune öffnen kann. Den Schlüssel hat Lio im Erntefeld verloren.'); }
+    } },
+    { t: 'Was hast du mit den Fässern vor?', show: () => true, fn: async () => say('tovin', 'Die Fässer sind ein Kunstprojekt. Die Flaschen daneben sind die Kritik daran.') },
+    { t: 'Erzähl mir vom Dorf.', show: () => true, fn: async () => { await say('tovin', 'Das Dorf hat drei Jahreszeiten, die es gern hätte, und eine, die es hat. Manchmal ändern sie sich in einer Nacht.'); await say('mira', 'Seltsam. Genau das hat Elias in seinen Notizen erwähnt.'); } }
+  ]);
+}
+async function lioTalk() {
+  if (!F('lioMet')) { setF('lioMet'); await say('lio', 'Hallo! Du hast ein komisches Leuchten in der Tasche. Ist das ein Stern?'); await say('mira', 'Fast. Ein Herz. Ein Jahreszeitenherz.'); await say('lio', 'Oh! Ich hab einen Reim, der geht so: „Wo Herbst im Frühling steht …" – ach, den Rest habe ich vergessen!'); }
+  await talkLoop([
+    { t: 'Hast du Tovins Scheunenschlüssel?', show: () => F('oelDeal') && !has('schluessel') && !F('scheuneAuf'), fn: async () => {
+      await say('lio', 'Ähm … den hab ich im Erntefeld verloren! Die Krähen haben so schön geglänzt … Ich wollte ihn zurückholen, aber die Vögel sind viel frecher als ich.');
+      await say('lio', 'Krähen mögen nichts, was klirrt und sich bewegt. Und sie lieben Wind! Ohne Wind gewöhnen sie sich an alles.'); setF('lioHint');
+    } },
+    { t: 'Kennst du den Reim für den Nebelwald?', show: () => F('orinInfo'), fn: async () => { await say('lio', 'Jetzt fällt er mir wieder ein! „Erst folg dem Berg aus Wolkenhaar, dann dem Schwarm, der größte war, zuletzt dem Baum im weißen Kleid – dann bist du aus dem Nebel weit."'); setF('reim'); note('Lios Reim: Erst dem Berg aus Wolkenhaar, dann dem größten Vogelschwarm, zuletzt dem Baum im weißen Kleid.'); } },
+    { t: 'Was machst du hier?', show: () => true, fn: async () => say('lio', 'Ich schaue, wer kommt und wer geht. Heute: du. Gestern: ein Fuchs. Der war netter.') },
+    { t: 'Wie viele Jahreszeiten gibt es eigentlich?', show: () => F('ofenBrennt'), fn: async () => { await say('lio', 'Vier – und jeder Ort hat seine eigene. Zusammen sind sie ein ganzes Jahr, wie ein Lied mit vielen Stimmen!'); insight('Jeder Ort mit eigener Zeit – zusammen ein ganzes Jahr, wie ein Lied mit vielen Stimmen.'); } }
+  ]);
+}
+
+/* ======================= ERNTEFELD ======================= */
+SC.feld = {
+  id: 'feld', title: 'Erntefeld', natural: 'so', minX: 50, maxX: 900, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 240, 8, P.mtn, se !== 'he');
+    groundBase(c, P, se);
+    // Feld: Halme
+    const r = R(9); const col = { fr: '#8fdc5c', so: '#e8c23a', he: '#c89a34', wi: '#e8f0f8' }[se];
+    const h = { fr: 12, so: 40, he: 14, wi: 0 }[se];
+    if (se !== 'wi') for (let i = 0; i < 300; i++) { const x = r() * W, y = 415 + r() * 45; c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 2, y - h); c.stroke(); c.strokeStyle = mix(col, r() > .5 ? '#ffffff' : '#a06a10', .2); c.lineWidth = 1.8; c.stroke(); if (se === 'so') { c.fillStyle = col; c.beginPath(); c.ellipse(x + 2, y - h - 4, 2.4, 6, 0, 0, 7); c.fill(); } }
+    fence(c, 0, W, 452, se);
+    // Hedda-Häuschen
+    house(c, 30, 452, 130, 84, se, { skew: 3, wall: '#e8cfa0' });
+    tree(c, 900, 430, .7, se, 71);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push({
+      id: 'hedda', actor: 'hedda', name: 'Hedda', r: [215, 372, 70, 100], walk: 300, face: -1, head: [250, 372],
+      draw(c, t) { drawChar(c, 250, 470, CHAR.hedda, { dir: 1, t, talk: speech && speech.who === 'hedda' }); },
+      look: async () => say('mira', 'Hedda, Lios Oma. Gesichtszüge wie ein alter Apfel – und Augen wie ein Falke.'),
+      use: async () => heddaTalk()
+    });
+    const ready = F('scheuSeil') && F('scheuFlaschen');
+    list.push({
+      id: 'scarecrow', actor: 'scarecrow', name: 'Vogelscheuche', r: [510, 330, 90, 142], walk: 480, face: 1,
+      draw(c, t) {
+        const up = F('scheuSeil');
+        c.save(); c.translate(556, 472); if (!up) c.rotate(.55);
+        thick(c, [[0, 0], [0, -110]], '#8a5a30', 7); thick(c, [[-42, -84], [42, -84]], '#8a5a30', 7);
+        blob(c, 0, -118, 18, 20, '#e6cf98', 4, 3.5); c.fillStyle = INK; c.beginPath(); c.arc(-6, -122, 2.4, 0, 7); c.arc(7, -122, 2.4, 0, 7); c.fill(); line(c, [[-7, -110], [-2, -113], [3, -110], [8, -113]], INK, 2.5);
+        poly(c, [[-14, -142], [0, -166], [16, -142], [30, -140], [-30, -140]], '#8a5a30', 3);
+        poly(c, [[-22, -94], [22, -94], [18, -46], [4, -52], [-6, -44], [-20, -50]], '#a8503a', 3);
+        line(c, [[-42, -84], [-48, -70]], '#e6cf98', 3); line(c, [[42, -84], [48, -70]], '#e6cf98', 3);
+        if (up) line(c, [[-4, -60], [4, -96]], '#c9a05a', 3.5), line(c, [[-14, -70], [14, -70]], '#c9a05a', 3.5);
+        if (F('scheuFlaschen')) { const s = Math.sin(t * 3) * (se === 'so' ? 0 : 5); [[-34, -84], [0, -70], [34, -84]].forEach((p, i) => { line(c, [[p[0], p[1]], [p[0] + s, p[1] + 12]], INK, 2); rrect(c, p[0] + s - 4, p[1] + 12, 8, 18, 3, '#5ac08a', 2.5); c.fillStyle = 'rgba(255,255,255,.7)'; c.fillRect(p[0] + s - 1, p[1] + 15, 2, 8); }); }
+        c.restore();
+      },
+      look: async () => say('mira', !F('scheuSeil') ? 'Die Vogelscheuche liegt schief im Feld. Sie hat schon lange keine Krähe mehr erschreckt.' : (F('scheuFlaschen') ? 'Aufrecht und behängt mit Flaschen: eine wachsame Vogelscheuche.' : 'Sie steht wieder! Aber ein wenig … langweilig, so ohne Geklirr.')),
+      use: async () => say('mira', 'Ich tätschle sie freundlich. Sie bleibt reserviert.'),
+      items: {
+        seil: async () => { if (F('scheuSeil')) return say('mira', 'Sie steht doch schon.'); setF('scheuSeil'); sfx('use'); await say('mira', 'Ich stelle die Vogelscheuche auf und binde sie mit dem Seil an ihrer Stange fest. Sie steht wie eine Eins!'); await checkCrows(); },
+        flaschen: async () => { if (!F('scheuSeil')) return say('mira', 'Erst muss sie aufrecht stehen, sonst klirrt nichts.'); if (F('scheuFlaschen')) return; take('flaschen'); setF('scheuFlaschen'); sfx('use'); await say('mira', 'Ich hänge die Flaschen an die Arme. Ein Windhauch – und sie klirren, blinken und klingeln.'); await checkCrows(); }
+      }
+    });
+    if (se === 'fr' && !F('krWeg')) { /* Krähen werden dynamisch gezeichnet – Hotspot am Schlüssel */ }
+    if (!has('schluessel') && !F('scheuneAuf') && se === 'fr') list.push({
+      id: 'schluessel', name: F('krWeg') ? 'Scheunenschlüssel' : 'Krähen', r: [600, 420, 70, 55], walk: 640, face: 1,
+      draw(c, t) {
+        c.save(); c.translate(636, 462); c.rotate(-.3);
+        if (!F('krWeg') || true) { rrect(c, -14, -3, 28, 6, 3, '#d8b040', 2.5); ellip(c, -18, 0, 8, 8, '#d8b040', 2.5); ellip(c, -18, 0, 3, 3, '#4a3a20', 2); rrect(c, 8, 2, 4, 7, 1, '#d8b040', 2); }
+        c.restore();
+        if (!F('krWeg')) for (let i = 0; i < 3; i++) crow(c, 610 + i * 26, 462 + (i % 2) * 6, t + i, i % 2 ? -1 : 1);
+        if (F('krWeg')) { const g = .5 + .5 * Math.sin(t * 5); c.fillStyle = `rgba(255,240,150,${.4 + g * .4})`; c.beginPath(); c.arc(620, 452, 4, 0, 7); c.fill(); }
+      },
+      look: async () => say('mira', F('krWeg') ? 'Da liegt ein glänzender Schlüssel – zwischen den Keimlingen versteckt.' : 'Drei Krähen hüpfen um etwas Glänzendes herum. Sie krächzen mich böse an.'),
+      use: async () => {
+        if (F('krWeg')) { give('schluessel'); setF('schluesselHat'); await say('mira', 'Tovins Scheunenschlüssel! Endlich.'); insight('Jedes Feld hat seine Zeit – wer alles auf einmal will, verliert alles auf einmal.'); return; }
+        sfx('fail'); await say('mira', 'Ich strecke die Hand aus – die Krähen hacken nach mir! Und sie krächzen, als hätte ich sie beleidigt.');
+      }
+    });
+    list.push({
+      id: 'weizen', name: se === 'so' ? 'Weizenfeld' : 'Feld', r: [300, 380, 200, 90], walk: 400,
+      draw() { },
+      look: async () => say('mira', { fr: 'Zarte, junge Keimlinge. Zwischen ihnen glitzert etwas.', so: 'Der Weizen steht hoch und golden – hoch genug, um einen Schlüssel darin völlig zu verlieren.', he: 'Stoppeln und Erntereste.', wi: 'Das Feld schläft unter einer Schneedecke.' }[se]),
+      use: async () => say('mira', se === 'so' ? 'Ich wühle durch den hohen Weizen. Nichts als Ähren, so weit man sieht.' : 'Hier gibt es nichts zu tun.')
+    });
+    list.push(edgeExit('l', 'dorf', 'Zum Dorfplatz', 800, null));
+    return list;
+  },
+  dyn(c, t, se) { },
+  async onEnter() { if (!F('introFeld')) { setF('introFeld'); await say('mira', 'Das Erntefeld. Es ist Sommer – der Weizen steht mannshoch. Ob Lio hier wirklich einen Schlüssel verloren hat?'); } await checkCrows(); },
+  async onSeason() { await checkCrows(); }
+};
+function crow(c, x, y, t, d) {
+  c.save(); c.translate(x, y); c.scale(d, 1); const h = Math.abs(Math.sin(t * 5)) * 4;
+  blob(c, 0, -10 - h, 11, 8, '#2a2a34', 44, 2.5, false); poly(c, [[9, -12 - h], [18, -10 - h], [9, -8 - h]], '#e8a020', 2); c.fillStyle = '#fff'; c.beginPath(); c.arc(5, -13 - h, 2, 0, 7); c.fill();
+  poly(c, [[-10, -8 - h], [-19, -14 - h], [-10, -13 - h]], '#1a1a22', 2); line(c, [[-2, -3 - h], [-2, 0]], INK, 2); line(c, [[3, -3 - h], [3, 0]], INK, 2); c.restore();
+}
+async function checkCrows() {
+  if (S.scene !== 'feld') return;
+  if (curSeason() === 'fr' && F('scheuSeil') && F('scheuFlaschen') && !F('krWeg')) {
+    setF('krWeg'); sfx('season'); await say('mira', 'Ein frischer Frühlingswind fährt übers Feld … die Flaschen klirren und blitzen – und die Krähen stieben krächzend davon!');
+    await say('mira', 'Da im jungen Getreide liegt etwas Glänzendes …');
+  } else if (curSeason() === 'so' && F('scheuSeil') && F('scheuFlaschen') && !F('sommerWind')) {
+    setF('sommerWind'); await say('mira', 'Im Sommer steht die Luft still – kein Lüftchen. Die Flaschen hängen matt herunter. Ich brauche Wind.'); note('Im Sommer herrscht auf dem Feld Windstille. Wind gibt es in jeder anderen Jahreszeit.');
+  }
+}
+async function heddaTalk() {
+  if (!F('heddaMet')) { setF('heddaMet'); await say('hedda', 'Na, wen haben wir denn da? Eine Fremde mit einem leuchtenden Ding um den Hals! Ich bin Hedda.'); await say('mira', 'Mira. Ich suche einen Schlüssel, den Lio hier verloren hat.'); await say('hedda', 'Ach, das Kind! Die Krähen haben ihn. Glänzendes – das ist ihre Schwäche.'); }
+  await talkLoop([
+    { t: 'Wie werde ich die Krähen los?', show: () => !F('krWeg'), fn: async () => { await say('hedda', 'Krähen sind schlau. Sie fürchten Bewegung und Blinken – aber sie gewöhnen sich an alles, was starr herumsteht.'); await say('hedda', 'Meine alte Vogelscheuche liegt drüben. Ein Seil, ein paar Flaschen – und Wind. Der kommt in allen Jahreszeiten außer im Sommer.'); note('Hedda: Vogelscheuche aufrichten (Seil), Flaschen als Klapper anhängen – und Wind abwarten (nicht im Sommer).'); } },
+    { t: 'Ich habe den Schlüssel zurück!', show: () => has('schluessel') || F('schluesselHat'), fn: async () => { await say('hedda', 'Gut gemacht, Kind. Jedes Feld hat seine Zeit – wer alles auf einmal will, verliert alles auf einmal.'); } },
+    { t: 'Erzähl mir von dem Feld.', show: () => true, fn: async () => say('hedda', 'Im Frühling Keimlinge, im Sommer Weizen, im Herbst Garben. Früher jedenfalls. Jetzt kommt es, wie es will.') }
+  ]);
+}
+
+/* ======================= WERKSTATT ======================= */
+SC.werkstatt = {
+  id: 'werkstatt', title: 'Runas Werkstatt', natural: 'he', minX: 50, maxX: 880, startX: 330,
+  land(c, P, se) {
+    mountains(c, P, 235, 14, P.mtn, se !== 'he');
+    groundBase(c, P, se);
+    // Steinmauer
+    for (let i = 0; i < 20; i++) for (let j = 0; j < 2; j++) rrect(c, 20 + i * 46 + j * 22, 402 + j * 24, 44, 22, 5, j ? '#9a9aa8' : '#aaaab8', 2.5);
+    // Schuppendach
+    poly(c, [[600, 330], [900, 322], [920, 360], [590, 368]], P.roof, 3.5);
+    rrect(c, 606, 366, 12, 86, 2, '#8a5a30', 3); rrect(c, 880, 358, 12, 94, 2, '#8a5a30', 3);
+    if (se === 'wi') poly(c, [[600, 330], [900, 322], [912, 340], [600, 348]], '#fff', 3);
+    tree(c, 40, 428, .75, se, 91);
+    // Ruß auf dem Boden
+    c.fillStyle = 'rgba(30,20,20,.28)'; c.beginPath(); c.ellipse(190, 478, 130, 14, 0, 0, 7); c.fill();
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    const luft = ['zu', 'halb offen', 'offen'][S.flags.luft || 0];
+    list.push({
+      id: 'ofen', name: 'Schmelzofen', r: [70, 300, 150, 175], walk: 240, face: -1,
+      draw(c, t) {
+        poly(c, [[80, 474], [92, 350], [130, 318], [176, 318], [212, 350], [222, 474]], '#a8a8b6', 3.8);
+        c.fillStyle = 'rgba(20,10,40,.18)'; c.beginPath(); c.moveTo(176, 318); c.lineTo(212, 350); c.lineTo(222, 474); c.lineTo(170, 474); c.fill();
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 5; j++) { c.strokeStyle = 'rgba(42,24,16,.4)'; c.lineWidth = 1.8; c.strokeRect(96 + j * 24 + (i % 2) * 10, 340 + i * 30, 24, 30); }
+        rrect(c, 130, 270, 34, 60, 3, '#8a7a7a', 3.5);
+        poly(c, [[110, 474], [110, 420], [132, 398], [170, 398], [192, 420], [192, 474]], '#1a0e10', 3.5);
+        if (F('ofenBrennt')) { flame(c, 151, 470, 1.6, t); smoke(c, 147, 262, t, 'rgba(80,80,90,.8)'); glow(c, 151, 430, 160, 'rgba(255,140,40,A)', .35); }
+        else if (F('holzImOfen')) { for (let i = 0; i < 3; i++) rrect(c, 120 + i * 20, 448 + (i % 2) * 6, 34, 10, 4, '#d0a060', 2.5); }
+        rrect(c, 112, 380, 78, 10, 3, '#4a3a3a', 3); // Luftklappe
+        const ang = [-.9, 0, .9][S.flags.luft || 0];
+        c.save(); c.translate(200, 384); c.rotate(ang); line(c, [[0, 0], [0, -28]], INK, 6); line(c, [[0, 0], [0, -28]], '#c08a3a', 3); ellip(c, 0, -30, 5, 5, '#d04a3a', 2.5); c.restore();
+        if (F('ofenBrennt')) { c.fillStyle = 'rgba(30,20,20,.35)'; c.beginPath(); c.ellipse(151, 335, 26, 8, 0, 0, 7); c.fill(); }
+      },
+      look: async () => say('mira', 'Runas Schmelzofen. Auf der Seite sitzt eine Luftklappe – "' + luft + '". ' + (F('holzImOfen') ? 'Trockenes Holz liegt schon drin.' : 'Er ist leer und kalt.')),
+      use: async () => { S.flags.luft = ((S.flags.luft || 0) + 1) % 3; sfx('click'); await say('mira', 'Ich drehe an der Luftklappe. Sie steht jetzt auf "' + ['zu', 'halb offen', 'offen'][S.flags.luft] + '".'); },
+      items: {
+        holzTrocken: async () => { if (F('holzImOfen')) return; take('holzTrocken'); setF('holzImOfen'); sfx('use'); await say('mira', 'Ich schichte die trockenen Scheite in den Ofen.'); },
+        holz: async () => say('mira', 'Das Lagerholz ist für ein Lagerfeuer gedacht. Für einen Schmelzofen brauche ich mehr – und trockeneres Holz von Runas Sägewerk.'),
+        holzNass: async () => say('mira', 'Nasses Holz im Ofen? Das gäbe nur Qualm und einen Wutanfall von Runa.'),
+        fackelLit: async () => {
+          if (!F('holzImOfen')) return say('mira', 'Ohne Holz gibt es nichts anzuzünden.');
+          const l = S.flags.luft || 0;
+          if (l === 0) { sfx('fail'); return say('mira', 'Die Fackel züngelt am Holz – und erstickt. Luftklappe zu: Dem Feuer fehlt die Luft. Verbrennung braucht Sauerstoff!'); }
+          if (l === 2) { sfx('fail'); return say('mira', 'Die Flamme flackert und kühlt aus – zu viel kalte Luft zieht durch. Ich muss die Klappe irgendwo dazwischen einstellen.'); }
+          setF('ofenBrennt'); sfx('fire'); await say('mira', 'Die Fackel entzündet das trockene Holz, und mit halb offener Klappe faucht der Ofen zum Leben. Perfekt!');
+          if (!F('runaOfenGesehen')) { setF('runaOfenGesehen'); await say('runa', 'Na also! Das Feuer brennt sauber. Kluges Mädchen.'); }
+        },
+        fackel: async () => say('mira', 'Die Fackel ist nicht angezündet. Erst am Lagerfeuer entzünden.'),
+        kessel: async () => { if (!F('ofenBrennt')) return say('mira', 'Der Ofen ist kalt. Ohne Feuer keine Asche.'); if (has('kesselAsche')) return; swap('kessel', 'kesselAsche'); await say('mira', 'Ich schaufle etwas feine, kalte Asche aus dem Ofenrost. Kann man sicher mal brauchen.'); }
+      }
+    });
+    list.push({
+      id: 'runa', actor: 'runa', name: 'Runa', r: [222, 372, 70, 102], walk: 330, face: -1, head: [255, 372],
+      draw(c, t) { drawChar(c, 255, 470, CHAR.runa, { dir: 1, t, talk: speech && speech.who === 'runa' }); },
+      look: async () => say('mira', 'Runa, die Schmiedin. Arme wie Brechstangen und ein Blick, der Eisen schmelzen könnte.'),
+      use: async () => runaTalk(),
+      items: { haematit: () => runaSegment() }
+    });
+    list.push({
+      id: 'saege', name: 'Sägewerk', r: [440, 340, 150, 135], walk: 470, face: 1,
+      draw(c, t) {
+        rrect(c, 450, 420, 130, 48, 6, '#8a5a30', 3.5); rrect(c, 458, 380, 8, 46, 2, '#6a4422', 3); rrect(c, 566, 380, 8, 46, 2, '#6a4422', 3);
+        const rusty = !F('saegeGeoelt'), sp = rusty ? 0 : t * 6;
+        c.save(); c.translate(512, 390); c.rotate(sp); c.beginPath(); c.arc(0, 0, 32, 0, 7); c.fillStyle = rusty ? '#a86a3a' : '#c0c8d4'; c.fill(); stroke(c, 3.5);
+        c.beginPath(); for (let i = 0; i < 16; i++) { const a = i / 16 * 6.28; c.lineTo(Math.cos(a) * 32, Math.sin(a) * 32); c.lineTo(Math.cos(a + .2) * 40, Math.sin(a + .2) * 40); c.lineTo(Math.cos(a + .39) * 32, Math.sin(a + .39) * 32); } c.closePath(); c.fillStyle = rusty ? '#a86a3a' : '#c0c8d4'; c.fill(); stroke(c, 2.5);
+        ellip(c, 0, 0, 7, 7, '#4a4a54', 2.5); c.restore();
+        if (F('holzGesaegt') && !F('holzImOfen') && !F('holzNassAuf') && !has('holzNass') && !has('holzTrocken')) for (let i = 0; i < 3; i++) rrect(c, 470 + i * 26, 434, 34, 10, 4, '#a0794a', 2.5);
+        if (!rusty && F('saegeBetrieb')) { c.fillStyle = '#e8d090'; for (let i = 0; i < 6; i++) { c.beginPath(); c.arc(512 + Math.sin(t * 9 + i) * 20, 420 - i * 5, 2, 0, 7); c.fill(); } }
+      },
+      look: async () => say('mira', F('saegeGeoelt') ? 'Das geölte Sägewerk dreht sich sanft und flüsterleicht.' : 'Das Sägewerk. Das Blatt ist festgerostet – mit ein bisschen Öl wäre es wieder flott.'),
+      use: async () => {
+        if (!F('saegeGeoelt')) return say('mira', 'Ich drücke am Hebel. Es knirscht und quietscht – aber nichts bewegt sich. Rost!');
+        if (F('holzGesaegt')) return say('mira', 'Genug Scheite gesägt.');
+        sfx('use'); setF('saegeBetrieb'); await say('mira', 'Das Blatt kreischt durch einen Stamm – Sägemehl wirbelt.'); setF('saegeBetrieb', false); setF('holzGesaegt'); give('holzNass'); await say('mira', 'Frisch gesägte, nasse Scheite. Die müssen erst trocknen.'); setF('holzGesaegt', false); setF('holzGesaegtDone');
+      },
+      items: {
+        oel: async () => { if (F('saegeGeoelt')) return; take('oel'); setF('saegeGeoelt'); sfx('success'); await say('mira', 'Ich träufle Tovins Leinöl auf Lager und Sägeblatt. Es ächzt … dann läuft es rund!'); }
+      }
+    });
+    list.push({
+      id: 'gestell', name: 'Trockengestell', r: [700, 380, 200, 96], walk: 690, face: 1,
+      draw(c, t) {
+        rrect(c, 712, 398, 8, 74, 2, '#8a5a30', 3); rrect(c, 872, 398, 8, 74, 2, '#8a5a30', 3);
+        for (let j = 0; j < 3; j++) rrect(c, 708, 420 + j * 16, 176, 6, 2, '#a06a38', 2.5);
+        if (F('holzNassAuf')) for (let i = 0; i < 4; i++) { const wet = curSeason() !== 'so'; rrect(c, 730 + i * 34, 402 + (i % 2) * 8, 40, 12, 5, wet ? '#8a6a44' : '#e0b880', 2.5); if (wet) { c.fillStyle = '#5a9ad8'; c.beginPath(); c.arc(748 + i * 34, 420, 2, 0, 7); c.fill(); } }
+        if (F('holzNassAuf') && curSeason() === 'so') { c.fillStyle = 'rgba(255,240,140,.25)'; c.beginPath(); c.ellipse(800, 410, 70, 20, 0, 0, 7); c.fill(); }
+      },
+      look: async () => say('mira', F('holzNassAuf') ? (curSeason() === 'so' ? 'Die Scheite trocknen in der Sommersonne knochentrocken.' : 'Die Scheite liegen feucht im Herbstnebel. Trocken werden sie so nie.') : 'Ein Trockengestell für frisches Holz. Im Sommer trocknet hier alles in Tagen.'),
+      use: async () => {
+        if (F('holzNassAuf') && curSeason() === 'so') { setF('holzNassAuf', false); give('holzTrocken'); await say('mira', 'Knochentrocken – perfekt für den Ofen!'); return; }
+        if (F('holzNassAuf')) return say('mira', 'Das Holz ist noch nass. Im Herbstnebel trocknet hier gar nichts. Ich brauche Sommer.');
+        await say('mira', 'Nichts drauf. Ich lege gern nasse Scheite auf.');
+      },
+      items: {
+        holzNass: async () => { take('holzNass'); setF('holzNassAuf'); sfx('use'); await say('mira', 'Ich lege die nassen Scheite aufs Gestell.'); if (curSeason() === 'so') await say('mira', 'Die Sommersonne wird sie rasch trocknen.'); else await say('mira', 'Im Herbstnebel trocknet das nie. Ich brauche Sommer!'); }
+      }
+    });
+    list.push(edgeExit('l', 'dorf', 'Zum Dorfplatz', 860, null));
+    list.push(archExit('bergpfad', 'Bergpfad', 900, 470, 120, () => F('stangeHat'), 'Hinter dem Sägewerk führt ein Torbogen zum Bergpfad. Aber ohne Runas Segen und Werkzeug will ich da nicht hinauf.', 70));
+    list.push(archExit('garten', 'Selmas Garten', 385, 448, 120, () => F('segment'), 'Der Torbogen führt zu Selmas Garten. Erst muss ich Runa das Hämatit bringen – ihr Segment schaltet die nächste Jahreszeit frei.', 80));
+    return list;
+  },
+  async onEnter() {
+    if (!F('runaMet')) {
+      setF('runaMet'); await say('mira', 'Eine Werkstatt! Rauch, Ruß – und eine Frau am Ofen, die genau weiß, was sie will.');
+      await say('runa', 'Hände weg von den Werkzeugen, Fremde! … Nein, ich mache Spaß. Ich bin Runa. Was führt dich her?');
+      await say('mira', 'Ich suche meinen Lehrmeister Elias und die Jahreszeiten, die durcheinandergeraten sind.'); await say('runa', 'Dann bist du hier richtig. Der Ofen ist kalt, das Sägewerk festgerostet – bring mir trockenes Holz und wir reden.');
+    }
+  },
+  async onSeason(n) { }
+};
+async function runaTalk() {
+  await talkLoop([
+    { t: 'Was ist mit dem Sägewerk?', show: () => !F('saegeGeoelt'), fn: async () => { await say('runa', 'Festgerostet. Ohne Leinöl bewegt sich da nichts. Tovin hat welches – aber Tovin will Äpfel dafür.'); note('Runa: Das Sägewerk braucht Leinöl. Tovin hat es (gegen Äpfel).'); } },
+    { t: 'Wie kriege ich den Ofen zum Brennen?', show: () => !F('ofenBrennt'), fn: async () => { await say('runa', 'Trockenes Holz – nicht nasses! Und die Luftklappe darf weder ganz zu noch ganz offen sein. Verbrennung braucht Sauerstoff, aber zu viel kalte Luft kühlt die Flamme.'); note('Ofen: Trockenes Holz einlegen, Luftklappe auf "halb offen", dann mit brennender Fackel anzünden.'); } },
+    { t: 'Der Ofen brennt! Und jetzt?', show: () => F('ofenBrennt') && !F('stangeHat'), fn: async () => {
+      await say('runa', 'Ausgezeichnet! Jetzt kann ich endlich ans Schmieden. Aber für ein Segment für dein Herz brauche ich Sternstahl – und das gibt Hämatit.');
+      await say('runa', 'In der alten Erzgrube oben am Bergpfad liegt welches. Der Felsblock am Pfad versperrt den Weg. Hier – meine Brechstange. Mit dem richtigen Drehpunkt ist sie ein mächtiger Hebel.');
+      give('stange'); setF('stangeHat'); setF('erzZiel'); sfx('success'); note('Runa schickt mich zur Erzgrube am Bergpfad: Hämatit besorgen. Die Brechstange hilft gegen den Felsblock.');
+    } },
+    { t: 'Wem gehört eigentlich die Zeit?', show: () => F('ofenBrennt'), fn: async () => { await say('runa', 'Hm. Ein Werkzeug, das nur einer benutzt, rostet. Geteilte Verantwortung hält. Die Zeit gehört allen – oder keinem.'); insight('Ein Werkzeug, das nur einer benutzt, rostet – geteilte Verantwortung hält.'); } },
+    { t: 'Ich habe das Hämatit!', show: () => has('haematit') && !F('segment'), fn: () => runaSegment() },
+    { t: 'Wie fange ich das Ganze an?', show: () => F('stangeHat'), fn: async () => say('runa', 'Hinter dem Sägewerk ist der Torbogen zum Bergpfad. Nimm einen kantigen Stein mit – als Drehpunkt für den Hebel!') }
+  ]);
+}
+
+/* =====================================================================
+   Dialog-Schleife
+   ===================================================================== */
+async function talkLoop(list) {
+  for (;;) {
+    const vis = list.filter(l => l.show()), opts = vis.map(v => v.t).concat(['Tschüss.']);
+    const i = await choice(opts); if (i >= vis.length) return; await vis[i].fn();
+  }
+}
+
+/* =====================================================================
+   Kombinationen im Inventar
+   ===================================================================== */
+addCombo('phioleSchnee', 'blueten', async () => { take('phioleSchnee'); take('blueten'); give('phioleMisch', true); sfx('use'); await say('mira', 'Schnee und Blüten in einer Phiole. Die Mischung schimmert, aber sie ist eiskalt. Sie braucht sanfte Wärme – ein Feuer!'); });
+addCombo('phiole', 'blueten', async () => say('mira', 'Erst brauche ich Schnee. Blüten allein tun noch gar nichts.'));
+addCombo('essenz', 'herz', async () => {
+  if (!F('ringOk')) return say('mira', 'Der Ring sitzt noch schief. Bevor ich die Essenz einfülle, muss ich ihn richtig ausrichten.');
+  take('essenz'); await say('mira', 'Ich gieße die Blütenessenz in das Herz …'); sfx('season'); flash = 1; await sleep(500);
+  S.hasHeart = true; S.unlocked = ['fr', 'so']; setF('herzAktiv'); sfx('success');
+  await say('mira', 'Das Herz erwacht! Es pulsiert warm in meiner Hand. Frühling und Sommer sind frei.');
+  await say('mira', 'Ich kann jetzt die Jahreszeit eines Ortes umschalten – mit dem Medaillon unten rechts oder der Taste S.');
+  note('Das Jahreszeitenherz schaltet die Jahreszeit eines Ortes um (Medaillon unten rechts / Taste S). Bisher: Frühling und Sommer.');
+});
+function findCombo(a, b) { return COMBOS.find(c => (c[0] === a && c[1] === b) || (c[0] === b && c[1] === a)); }
+
+/* =====================================================================
+   Ziele / Hinweise (Tagebuch)
+   ===================================================================== */
+const OBJ = [
+  { id: 'zelt', t: 'In Elias\' Zelt gelangen.', show: () => true, done: () => F('zeltAuf'), h: ['Elias\' Zelt ist zugefroren. Du brauchst etwas, das dir hilft.', 'Im Lager liegt eine Kiste – und im Baumstumpf steckt eine Axt.', 'Nimm das Seil aus der Kiste, benutze es mit der Axt im Stumpf und dann die Axt mit dem Zelt.'] },
+  { id: 'notizen', t: 'Elias\' nasse Notizen trocknen.', show: () => F('zeltAuf'), done: () => has('notizen') || F('notizenAuf'), h: ['Die Notizen brauchen Wärme und eine Unterlage.', 'Ein Feuer und das Dreibein könnten helfen. Auf der Wäscheleine hängt ein Tuch.', 'Entfache das Feuer mit Brennholz vom Stapel, spanne das Tuch von der Leine übers Dreibein und lege die Notizen darauf.'] },
+  { id: 'ring', t: 'Den Ring des Jahreszeitenherzens ausrichten.', show: () => F('zeltAuf'), done: () => F('ringOk'), h: ['Klicke das Herz im Inventar an.', 'Elias\' Notizen beschreiben die Reihenfolge nach dem Lauf der Sonne.', 'Oben Frühling (Blüten), rechts (Osten) Sommer (Sonne), unten Winter (Schnee), links (Westen) Herbst.'] },
+  { id: 'essenz', t: 'Energie für das Herz beschaffen.', show: () => F('zeltAuf'), done: () => F('herzAktiv'), h: ['Elias\' Notizen nennen ein Rezept: Schnee, Blüten und Wärme.', 'Die Phiole lässt sich an der Schneewehe füllen und mit den Blüten mischen.', 'Phiole an der Schneewehe füllen, mit den Blüten kombinieren, am Lagerfeuer erwärmen – dann die Essenz mit dem Herz kombinieren.'] },
+  { id: 'weg', t: 'Den verschneiten Weg ins Dorf freimachen.', show: () => F('herzAktiv'), done: () => F('weg'), h: ['Das Herz kann die Jahreszeit ändern.', 'Klicke auf das Medaillon unten rechts.', 'Klicke auf das Medaillon unten rechts (oder Taste S) und wähle den Frühling.'] },
+  { id: 'runa', t: 'Die Schmiedin Runa aufsuchen.', show: () => F('weg'), done: () => F('runaMet'), h: ['Im Dorf hört man Hämmern von einer Werkstatt.', 'Die Werkstatt liegt östlich des Dorfplatzes.', 'Geh im Dorf nach rechts und sprich mit Runa neben ihrem Ofen.'] },
+  { id: 'saege', t: 'Das Sägewerk wieder in Gang bringen.', show: () => F('runaMet'), done: () => F('saegeGeoelt'), h: ['Das Sägewerk ist festgerostet. Ein Schmiermittel wäre nötig.', 'Tovin auf dem Dorfplatz hat Leinöl und liebt Äpfel.', 'Stell den Dorfplatz auf Sommer, pflücke Äpfel, gib sie Tovin, hol das Öl aus seiner Scheune und benutze es mit der Säge.'] },
+  { id: 'schluessel', t: 'Den Scheunenschlüssel im Erntefeld finden.', show: () => F('oelDeal'), done: () => has('schluessel') || F('scheuneAuf') || F('schluesselHat'), h: ['Lio hat den Schlüssel im Erntefeld verloren. Krähen bewachen ihn.', 'Krähen fürchten Bewegung und Geklirr – und Wind. Die Scheuche liegt im Feld.', 'Scheuche mit dem Seil aufrichten und die leeren Flaschen von Tovins Fässern daran hängen. Im Sommer ist es windstill – stell das Feld auf Frühling: Die Böen vertreiben die Krähen, und der Schlüssel liegt zwischen den Keimlingen.'] },
+  { id: 'scheune', t: 'Das Leinöl aus Tovins Scheune holen.', show: () => has('schluessel') || F('scheuneAuf'), done: () => has('oel') || F('saegeGeoelt'), h: ['Der Schlüssel öffnet Tovins Scheune.', 'Benutze den Schlüssel bei Tovins Haus auf dem Dorfplatz.', 'Benutze den Scheunenschlüssel mit Tovins Haus.'] },
+  { id: 'holz', t: 'Trockenes Brennholz für den Ofen besorgen.', show: () => F('saegeGeoelt'), done: () => has('holzTrocken') || F('holzImOfen'), h: ['Das Sägewerk liefert nasse Scheite. Sie müssen trocknen.', 'Das Trockengestell steht in der Werkstatt – und die Sonne trocknet am besten im Sommer.', 'Leg die nassen Scheite aufs Gestell und stelle die Werkstatt auf Sommer.'] },
+  { id: 'ofen', t: 'Runas Ofen anfeuern.', show: () => F('runaMet'), done: () => F('ofenBrennt'), h: ['Der Ofen braucht trockenes Holz, Feuer und die richtige Luftzufuhr.', 'Die Luftklappe darf weder zu noch ganz offen sein. Eine Fackel muss am Lagerfeuer angezündet werden.', 'Stell die Luftklappe auf halb, leg trockenes Holz ein und zünde es mit der am Lagerfeuer entzündeten Fackel an.'] },
+  { id: 'erz', t: 'Hämatit aus der alten Erzgrube holen.', show: () => F('stangeHat'), done: () => F('segment'), h: ['Runa schickt dich zum Bergpfad.', 'Ein Felsblock versperrt den Pfad. Ein kantiger Stein wäre ein guter Drehpunkt.', 'Kantigen Stein aufheben, direkt an den Block legen, Brechstange ansetzen. In der Grube: Scherbe von Ansgar, jedes Erz über die Scherbe reiben – Hämatit streicht kirschrot. Spitzhacke leihen, Hämatit abbauen, Runa geben.'] }
+];
+
+/* =====================================================================
+   Szenenwechsel, Jahreszeit, Interaktion
+   ===================================================================== */
+async function gotoScene(id, x) {
+  const sc = SC[id]; await fadeTo(1);
+  S.scene = id; S.x = x != null ? x : sc.startX; S.target = null; S.visited[id] = true; hover = null; speech = null;
+  saveGame('slvj_auto'); await fadeTo(0); await sc.onEnter?.();
+}
+function fadeTo(v) { return new Promise(r => { if (AUTO) { fade = v; return r(); } const s = fade, t0 = now(); (function f() { const p = Math.min(1, (now() - t0) / .3); fade = s + (v - s) * p; p < 1 ? requestAnimationFrame(f) : r(); })(); }); }
+async function switchSeason(se) {
+  const sc = SC[S.scene]; const old = curSeason(); if (se === old) return;
+  flash = 1; sfx('season'); await sleep(350); S.season[S.scene] = se; await sleep(350);
+  await sc.onSeason?.(se, old);
+}
+async function doExit(o) {
+  if (o.cond && !o.cond()) { sfx('fail'); return say('mira', o.blocked || 'Da komme ich noch nicht durch.'); }
+  await gotoScene(o.exit, o.toX);
+}
+function objects() { return SC[S.scene].objs().filter(o => o.show ? o.show() : true); }
+function faceTo(o) { const cx = o.face ? S.x + o.face : (o.r[0] + o.r[2] / 2); S.dir = o.face ? o.face : (cx >= S.x ? 1 : -1); }
+async function walkTo(x) {
+  x = clamp(x, SC[S.scene].minX, SC[S.scene].maxX); S.target = x;
+  if (AUTO) { S.x = x; S.target = null; return; }
+  await new Promise(res => { (function chk() { if (Math.abs(S.x - x) < 3 || S.target !== x) { res(); } else requestAnimationFrame(chk); })(); });
+}
+async function interact(o, item, mode) {
+  if (busy) return; busy = true; const it = item;
+  try {
+    speech = null;
+    if (mode === 'look') { faceTo(o); await (o.look ? o.look() : say('mira', 'Nichts Besonderes.')); return; }
+    if (o.kind === 'exit') { await walkTo(o.walk); if (!it) await doExit(o); else if (o.items && o.items[it]) await o.items[it](it); else await say('mira', 'Damit komme ich nicht weiter.'); return; }
+    await walkTo(o.walk != null ? o.walk : o.r[0] + o.r[2] / 2); S.target = null; faceTo(o);
+    sel = null;
+    if (it) { const fn = o.items && o.items[it]; if (fn) await fn(it); else await failItem(it, o); }
+    else await (o.use ? o.use() : o.look());
+  } finally { busy = false; S.target = null; }
+}
+async function invClick(id, right) {
+  if (busy) return;
+  if (right) { busy = true; try { await say('mira', ITEMS[id].d); } finally { busy = false; } return; }
+  if (sel && sel !== id) { const cb = findCombo(sel, id); const a = sel; sel = null; busy = true; try { if (cb) await cb[2](); else { sfx('fail'); await say('mira', 'Die beiden passen nicht zusammen.'); } } finally { busy = false; } return; }
+  if (sel === id) { sel = null; return; }
+  if (ITEMS[id].direct) { busy = true; try { await directItem(id); } finally { busy = false; } return; }
+  sel = id; sfx('click');
+}
+
+/* =====================================================================
+   Speichern
+   ===================================================================== */
+function saveGame(k) { try { localStorage.setItem(k, JSON.stringify(Object.assign({}, S, { target: null }))); } catch (e) { } }
+function loadGame(k) { try { const s = JSON.parse(localStorage.getItem(k)); if (s && SC[s.scene]) { S = Object.assign(newState(), s); return true; } } catch (e) { } return false; }
+const hasSave = () => { try { return !!localStorage.getItem('slvj_auto'); } catch (e) { return false; } };
+
+/* =====================================================================
+   Rendering
+   ===================================================================== */
+const landCache = {}; let landKey = '', landCv = null;
+function getLand() {
+  const key = S.scene + '|' + curSeason();
+  if (key !== landKey) { landKey = key; landCv = document.createElement('canvas'); landCv.width = W; landCv.height = H; SC[S.scene].land(landCv.getContext('2d'), PAL[curSeason()], curSeason()); }
+  return landCv;
+}
+function drawSky(c, t, se) {
+  const P = PAL[se]; c.fillStyle = grad(c, 0, 0, 0, 380, [P.sky[0], P.sky[1]]); c.fillRect(0, 0, W, H);
+  const sx = se === 'wi' ? 760 : 130, sy = se === 'wi' ? 120 : 90;
+  c.save(); glow(c, sx, sy, 150, se === 'he' ? 'rgba(255,190,90,A)' : 'rgba(255,240,150,A)', .55); c.restore();
+  c.fillStyle = P.sun; c.beginPath(); c.arc(sx, sy, 34, 0, 7); c.fill(); stroke(c, 3);
+  if (se !== 'wi') { c.strokeStyle = 'rgba(255,220,90,.7)'; c.lineWidth = 4; for (let i = 0; i < 10; i++) { const a = i / 10 * 6.28 + t * .1; c.beginPath(); c.moveTo(sx + Math.cos(a) * 42, sy + Math.sin(a) * 42); c.lineTo(sx + Math.cos(a) * 56, sy + Math.sin(a) * 56); c.stroke(); } }
+  for (let i = 0; i < 6; i++) { const sp = 6 + (i % 3) * 4, x = ((i * 190 + t * sp) % (W + 240)) - 120, y = 50 + (i * 43) % 150; cloud(c, x, y, 1 + (i % 3) * .3, se); }
+}
+function cloud(c, x, y, s, se) {
+  const col = se === 'he' ? '#fff4e0' : '#ffffff';
+  [[0, 0, 34, 22], [32, -10, 32, 24], [62, 2, 30, 20], [30, 8, 46, 16]].forEach((b, i) => { blobPath(c, x + b[0] * s, y + b[1] * s, b[2] * s, b[3] * s, i + 2); c.fillStyle = col; c.fill(); c.lineWidth = 2.5; c.strokeStyle = 'rgba(42,24,16,.55)'; c.stroke(); });
+  c.fillStyle = col; [[0, 0, 34, 22], [32, -10, 32, 24], [62, 2, 30, 20], [30, 8, 46, 16]].forEach((b, i) => { blobPath(c, x + b[0] * s, y + b[1] * s, b[2] * s - 2, b[3] * s - 2, i + 2); c.fill(); });
+}
+const hsh = n => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+const parts = Array.from({ length: 90 }, (_, i) => ({ x: hsh(i + 1) * W, y: hsh(i + 91) * H, s: .5 + hsh(i + 191) * 1.3, p: hsh(i + 291) * 6 }));
+function drawParticles(c, t, se) {
+  if (se === 'wi') { c.fillStyle = 'rgba(255,255,255,.9)'; parts.forEach(p => { const y = (p.y + t * 34 * p.s) % H, x = p.x + Math.sin(t + p.p) * 16; c.beginPath(); c.arc(x, y, 1.6 * p.s + .8, 0, 7); c.fill(); }); }
+  else if (se === 'he') { parts.slice(0, 26).forEach(p => { const y = (p.y + t * 28 * p.s) % H, x = p.x + Math.sin(t * 1.2 + p.p) * 28; c.save(); c.translate(x, y); c.rotate(t + p.p); c.fillStyle = p.s > 1 ? '#e77b26' : '#c9501c'; c.beginPath(); c.ellipse(0, 0, 5, 2.8, 0, 0, 7); c.fill(); c.restore(); }); }
+  else if (se === 'fr') { parts.slice(0, 26).forEach(p => { const y = (p.y + t * 22 * p.s) % H, x = p.x + Math.sin(t + p.p) * 24; c.fillStyle = '#ffc0d8'; c.beginPath(); c.ellipse(x, y, 3.4, 2.2, t + p.p, 0, 7); c.fill(); }); }
+  else { parts.slice(0, 14).forEach(p => { const x = (p.x + t * 6 * p.s) % W, y = 300 + Math.sin(t * .8 + p.p) * 60 + p.s * 30; c.fillStyle = 'rgba(255,255,200,.75)'; c.beginPath(); c.arc(x, y, 2, 0, 7); c.fill(); }); }
+}
+let vign = null;
+function drawVignette(c) {
+  if (!vign) { vign = document.createElement('canvas'); vign.width = W; vign.height = H; const g = vign.getContext('2d'); const rg = g.createRadialGradient(W / 2, H / 2, H * .45, W / 2, H / 2, H * .95); rg.addColorStop(0, 'rgba(20,8,20,0)'); rg.addColorStop(1, 'rgba(20,8,20,.5)'); g.fillStyle = rg; g.fillRect(0, 0, W, H); }
+  c.drawImage(vign, 0, 0);
+}
+const mira = { ph: 0 };
+function drawScene(c, t, dt) {
+  const se = curSeason(); drawSky(c, t, se); c.drawImage(getLand(), 0, 0);
+  const objs = objects();
+  const draws = objs.map(o => ({ z: (o.front ? 2000 : 0) + (o.r[1] + o.r[3]), fn: () => o.draw && o.draw(c, t) }));
+  draws.push({ z: 495, fn: () => drawChar(c, S.x, GY, CHAR.mira, { dir: S.dir, ph: mira.ph, walking: S.target != null && Math.abs(S.target - S.x) > 2, t, talk: speech && speech.who === 'mira' }) });
+  draws.sort((a, b) => a.z - b.z).forEach(d => d.fn());
+  drawParticles(c, t, se);
+  if (S.scene === 'werkstatt' && F('ofenBrennt')) glow(c, 150, 430, 260, 'rgba(255,140,40,A)', .18);
+  if (S.scene === 'lager' && F('feuer')) glow(c, 780, 440, 300, 'rgba(255,150,50,A)', .2);
+  drawVignette(c);
+  if (showHot) objs.forEach(o => { c.strokeStyle = '#ff0'; c.lineWidth = 2; c.strokeRect(o.r[0], o.r[1], o.r[2], o.r[3]); });
+}
+function bubbleFor(c, who, text, t0) {
+  const shown = AUTO ? text.length : Math.floor((now() - t0) * 55); const s = text.slice(0, shown);
+  const size = 22; let x, y, col = '#fff', name = null;
+  if (who === 'n') {
+    const lines = wrap(c, text, 760, size); const h = lines.length * 28 + 30; const w = 800;
+    rrect(c, W / 2 - w / 2, 30, w, h, 14, 'rgba(30,18,40,.92)', 3.5);
+    let n = 0; lines.forEach((l, i) => { const seg = l.slice(0, Math.max(0, shown - n)); n += l.length + 1; txt(c, seg, W / 2, 62 + i * 28, size, '#ffe9b0', 'center', false, false); }); return shown >= text.length;
+  }
+  const colors = { mira: '#e9c8ff', runa: '#ffb477', tovin: '#ffd86a', lio: '#8fd4ff', hedda: '#f0d0a0' }; col = colors[who] || '#fff';
+  if (who === 'mira') { x = S.x; y = GY - 130; name = 'Mira'; } else { const o = objects().find(o => o.actor === who); const hd = o ? (o.head || [o.r[0] + o.r[2] / 2, o.r[1]]) : [W / 2, 300]; x = hd[0]; y = hd[1] - 22; name = (typeof NAMES !== 'undefined' && NAMES[who]) || who[0].toUpperCase() + who.slice(1); }
+  const lines = wrap(c, text, 360, size); const w = Math.min(400, Math.max(...lines.map(l => c.measureText(l).width)) + 36), h = lines.length * 27 + 26;
+  const bx = clamp(x - w / 2, 14, W - w - 14), by = clamp(y - h, 14, H - h - 14);
+  c.fillStyle = '#fffdf2'; c.beginPath(); c.roundRect(bx, by, w, h, 18); c.fill(); stroke(c, 3.5);
+  const tx = clamp(x, bx + 24, bx + w - 24); c.beginPath(); c.moveTo(tx - 12, by + h - 1); c.lineTo(x + (x - tx) * .1, by + h + 26); c.lineTo(tx + 12, by + h - 1); c.fillStyle = '#fffdf2'; c.fill(); c.strokeStyle = INK; c.lineWidth = 3.5; c.stroke();
+  c.fillStyle = '#fffdf2'; c.fillRect(tx - 11, by + h - 4, 22, 6);
+  c.fillStyle = CHAR[who] ? dark(CHAR[who].top, .35) : '#444'; c.font = 'bold 15px ' + FONT; c.textAlign = 'left'; c.fillText(name, bx + 16, by + 20);
+  let n = 0; lines.forEach((l, i) => { const seg = l.slice(0, Math.max(0, shown - n)); n += l.length + 1; c.font = 'bold ' + size + 'px ' + FONT; c.fillStyle = INK; c.fillText(seg, bx + 18, by + 44 + i * 27); });
+  return shown >= text.length;
+}
+function button(c, x, y, w, h, label, fn, o = {}) {
+  const hv = mouse.x >= x && mouse.x <= x + w && mouse.y >= y && mouse.y <= y + h && !o.disabled;
+  rrect(c, x, y, w, h, 12, o.disabled ? '#8a8a8a' : hv ? '#ffe28a' : (o.fill || '#f4c542'), 3.5);
+  txt(c, label, x + w / 2, y + h / 2 + 7, o.size || 20, o.disabled ? '#ddd' : INK, 'center', true, false);
+  if (!o.disabled) btns.push({ x, y, w, h, fn });
+  return hv;
+}
+function panel(c, x, y, w, h, fill = '#f6e8c8') { rrect(c, x + 5, y + 6, w, h, 18, 'rgba(0,0,0,.4)', 0); rrect(c, x, y, w, h, 18, fill, 4); }
+function drawHUD(c, t) {
+  // Verb-Zeile
+  if (ui === null && !busy && hover) { const lab = sel ? 'Benutze ' + ITEMS[sel].n + ' mit ' + hover.name : (hover.kind === 'exit' ? '→ ' + hover.name : hover.name); txt(c, lab, W / 2, H - 76, 22, '#fff', 'center'); }
+  else if (ui === null && sel && !busy) txt(c, 'Benutze ' + ITEMS[sel].n + ' mit …', W / 2, H - 76, 22, '#fff', 'center');
+  // Ortsname
+  if (ui === null) txt(c, SC[S.scene].title + (S.hasHeart ? '  ·  ' + SEASONS[curSeason()] : ''), 16, 30, 20, '#fff', 'left');
+  // Medaillon
+  if (S.hasHeart && ui === null) {
+    const x = W - 46, y = H - 38, r = 24; const se = curSeason();
+    ellip(c, x, y, r + 5, r + 5, '#3a2a1a', 3.5); const cols = ['#ffb6d1', '#ffd84a', '#e77b26', '#a9d8ff'];
+    for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(x, y); c.arc(x, y, r, i * 1.5708 - 1.5708, i * 1.5708); c.fillStyle = cols[i]; c.fill(); }
+    ellip(c, x, y, r, r, null, 3); txt(c, SEASON_ICON[se], x, y + 8, 22, '#fff', 'center', false, false);
+    if (Math.hypot(mouse.x - x, mouse.y - y) < r + 6 && !busy) { txt(c, 'Jahreszeit ändern [S]', x, y - 34, 16, '#fff', 'center'); }
+  }
+  // Inventarleiste
+  const bh = 74, want = (mouse.y > H - 50) || (barShown && mouse.y > H - 100) || ui === 'inv';
+  if (barSuppress && mouse.y < H - 100) barSuppress = false;
+  barShown = want && !barSuppress && (ui === null || ui === 'inv') && S.inv.length > 0;
+  if (barShown) {
+    const y = H - bh; c.fillStyle = 'rgba(40,24,14,.94)'; c.fillRect(0, y, W, bh); c.strokeStyle = INK; c.lineWidth = 4; c.strokeRect(-2, y, W + 4, bh);
+    S.inv.forEach((id, i) => {
+      const x = 14 + i * Math.min(64, (W - 90) / Math.max(1, S.inv.length)), yy = y + 8, hv = mouse.x > x && mouse.x < x + 58 && mouse.y > yy && mouse.y < yy + 58 && !busy;
+      rrect(c, x, yy, 58, 58, 10, sel === id ? '#ffd86a' : hv ? '#e8c890' : '#c9a86a', 3);
+      c.font = '32px ' + FONT; c.textAlign = 'center'; c.fillStyle = INK; c.fillText(ITEMS[id].e, x + 29, yy + 40);
+      if (hv) { txt(c, ITEMS[id].n, x + 29, y - 8, 17, '#fff', 'center'); }
+      btns.push({ x, y: yy, w: 58, h: 58, inv: id, fn: null });
+    });
+  }
+  // Symbolleiste
+  if (ui === null) [['📓', 'Tagebuch [J]', () => { if (!busy) ui = 'journal'; }], ['🗺️', 'Karte [M]', () => { if (!busy) ui = 'map'; }], ['☰', 'Menü [Esc]', () => { if (!busy) ui = 'menu'; }]].forEach((b, i) => {
+    const x = W - 150 + i * 46, y = 8, hv = mouse.x > x && mouse.x < x + 40 && mouse.y > y && mouse.y < y + 40;
+    rrect(c, x, y, 40, 40, 10, hv ? '#ffe28a' : 'rgba(40,24,14,.85)', 3); c.font = '22px ' + FONT; c.textAlign = 'center'; c.fillStyle = hv ? INK : '#fff'; c.fillText(b[0], x + 20, y + 28);
+    btns.push({ x, y, w: 40, h: 40, fn: b[2] }); if (hv && !busy) txt(c, b[1], W - 20, 70, 14, '#fff', 'right');
+  });
+  // Sprechblase / Auswahl
+  if (speech) { const done = bubbleFor(c, speech.who, speech.text, speech.t0); if (done) { c.fillStyle = INK; const bx = W - 34 + Math.sin(t * 6) * 2; c.beginPath(); c.moveTo(bx - 8, H - 120); c.lineTo(bx + 8, H - 120); c.lineTo(bx, H - 108); c.fill(); } }
+  if (choiceSt) {
+    const o = choiceSt.opts, w = 700, h = o.length * 38 + 20, x = (W - w) / 2, y = H - h - 20; c.fillStyle = 'rgba(30,18,40,.94)'; c.beginPath(); c.roundRect(x, y, w, h, 16); c.fill(); stroke(c, 3.5);
+    o.forEach((s, i) => { const yy = y + 12 + i * 38, hv = mouse.y > yy && mouse.y < yy + 36 && mouse.x > x && mouse.x < x + w; if (hv) { c.fillStyle = 'rgba(255,226,138,.25)'; c.fillRect(x + 8, yy, w - 16, 36); } txt(c, (i + 1) + '.  ' + s, x + 24, yy + 26, 20, hv ? '#ffe28a' : '#fff', 'left', false, false); btns.push({ x, y: yy, w, h: 36, fn: () => { const r = choiceSt.res; choiceSt = null; r(i); } }); });
+  }
+  if (toast) { const a = now() - toast.t0; if (a > 3.2) toast = null; else { c.globalAlpha = Math.min(1, (3.2 - a)); rrect(c, W - 330, 60, 316, 40, 12, 'rgba(30,18,40,.92)', 3); txt(c, toast.t, W - 172, 87, 16, '#fff', 'center', true, false); c.globalAlpha = 1; } }
+}
+
+/* ----- Overlays ----- */
+const SYM = ['·', '🌸', '☀️', '❄️', '🍂'], SYMN = ['leer', 'Frühling', 'Sommer', 'Winter', 'Herbst'];
+function drawSeasonMenu(c) {
+  c.fillStyle = 'rgba(10,6,20,.7)'; c.fillRect(0, 0, W, H); panel(c, 230, 100, 500, 330);
+  txt(c, 'Jahreszeit dieses Ortes', W / 2, 146, 28, '#7b3fb8', 'center', true, false); txt(c, SC[S.scene].title, W / 2, 174, 18, '#5a4030', 'center', false, false);
+  const ss = ['fr', 'so', 'he', 'wi'], nat = SC[S.scene].natural; const cur = curSeason();
+  ss.forEach((s, i) => { const x = 260 + (i % 2) * 220, y = 200 + Math.floor(i / 2) * 68; button(c, x, y, 200, 56, SEASON_ICON[s] + ' ' + SEASONS[s] + (s === cur ? ' ✓' : '') + (s === nat ? ' ·' : ''), async () => { ui = null; busy = true; await switchSeason(s); busy = false; }, { disabled: !S.unlocked.includes(s), fill: PAL[s].sky[1] }); });
+  button(c, 260, 342, 420, 40, 'Natürlichen Lauf wiederherstellen (' + SEASONS[nat] + ')', async () => { ui = null; busy = true; await switchSeason(nat); busy = false; }, { size: 16, fill: '#e8c890' });
+  button(c, W / 2 - 60, 392, 120, 30, 'Schließen', () => { ui = null; }, { size: 15, fill: '#ddd' });
+}
+let jTab = 0;
+function drawJournal(c) {
+  c.fillStyle = 'rgba(10,6,20,.78)'; c.fillRect(0, 0, W, H); panel(c, 60, 24, 840, 492, '#efe0b4');
+  ['Ziele', 'Notizen'].forEach((n, i) => button(c, 90 + i * 130, 40, 120, 34, n, () => { jTab = i; }, { fill: jTab === i ? '#ffd86a' : '#c9a86a', size: 18 }));
+  button(c, 780, 40, 100, 34, 'Schließen', () => { ui = null; }, { size: 16 });
+  if (jTab === 0) {
+    let y = 110; const act = OBJ.filter(o => o.show() && !o.done()); const done = OBJ.filter(o => o.show() && o.done());
+    act.slice(0, 5).forEach(o => {
+      const lv = S.hints[o.id] || 0; txt(c, '◆ ' + o.t, 92, y, 20, '#3a2410', 'left', true, false); y += 26;
+      for (let i = 0; i < lv; i++) wrap(c, '💡 ' + o.h[i], 660, 16).forEach(s => { txt(c, s, 116, y, 16, '#5a3a20', 'left', false, false); y += 20; });
+      if (lv < 3) button(c, 770, y - 26 - lv * 0, 110, 26, 'Hinweis', () => { S.hints[o.id] = lv + 1; }, { size: 14, fill: '#f0d090' });
+      y += 12;
+    });
+    if (!act.length) txt(c, 'Keine offenen Ziele.', 92, y, 20, '#5a4030', 'left', false, false);
+    if (done.length) { y = Math.max(y, 420); txt(c, 'Erledigt: ' + done.length, 92, 488, 16, '#2a8a3a', 'left', false, false); }
+  } else {
+    let y = 116; S.notes.slice(-13).forEach(n => { wrap(c, '• ' + n, 780, 16).forEach(s => { txt(c, s, 92, y, 16, '#3a2410', 'left', false, false); y += 21; }); y += 4; });
+    if (!S.notes.length) txt(c, 'Noch keine Notizen.', 92, y, 18, '#5a4030', 'left', false, false);
+  }
+}
+function drawMenu(c) {
+  c.fillStyle = 'rgba(10,6,20,.75)'; c.fillRect(0, 0, W, H); panel(c, 330, 90, 300, 380);
+  txt(c, 'Pause', W / 2, 140, 30, '#7b3fb8', 'center', true, false);
+  button(c, 360, 164, 240, 44, 'Weiter', () => { ui = null; });
+  button(c, 360, 216, 240, 44, 'Speichern', () => { saveGame('slvj_1'); saveGame('slvj_auto'); showToast('Gespeichert.'); ui = null; });
+  button(c, 360, 268, 240, 44, 'Laden', () => { if (loadGame('slvj_1')) { ui = null; landKey = ''; showToast('Geladen.'); } else showToast('Kein Spielstand.'); });
+  button(c, 360, 320, 240, 44, sound ? 'Ton: an' : 'Ton: aus', () => { sound = !sound; });
+  button(c, 360, 372, 240, 44, 'Zum Titel', () => { saveGame('slvj_auto'); ui = 'title'; });
+  txt(c, 'Tasten: I Inventar · J Tagebuch · M Karte · S Jahreszeit · H Hotspots · F Vollbild', W / 2, 452, 12, '#5a4030', 'center', false, false);
+}
+function drawTitle(c, t) {
+  c.fillStyle = grad(c, 0, 0, 0, H, ['#3a1a5a', '#e8703a', '#ffd06a']); c.fillRect(0, 0, W, H);
+  for (let i = 0; i < 16; i++) { const a = i / 16 * 6.28 + t * .05; c.fillStyle = 'rgba(255,240,180,.10)'; c.beginPath(); c.moveTo(W / 2, 400); c.arc(W / 2, 400, 900, a, a + .14); c.fill(); }
+  // Schloss-Silhouette
+  c.fillStyle = '#20122e'; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 420); for (let x = 0; x <= W; x += 40) c.lineTo(x, 420 + Math.sin(x / 90) * 20); c.lineTo(W, H); c.fill();
+  poly(c, [[380, 430], [380, 330], [400, 330], [400, 300], [420, 280], [440, 300], [440, 330], [470, 330], [470, 290], [490, 270], [510, 290], [510, 330], [560, 330], [560, 430]], '#2a1a3a', 3.5);
+  [['🌸', 60, 120], ['☀️', 860, 110], ['🍂', 90, 330], ['❄️', 850, 330]].forEach(([e, x, y], i) => { c.font = '52px ' + FONT; c.textAlign = 'center'; c.fillStyle = '#fff'; c.fillText(e, x, y + Math.sin(t * 1.5 + i) * 8); });
+  txt(c, 'Das Schloss der', W / 2, 130, 52, '#ffe28a', 'center'); txt(c, 'verlorenen Jahreszeiten', W / 2, 196, 62, '#fff', 'center');
+  txt(c, 'Ein Comic-Adventure', W / 2, 236, 24, '#ffd0a0', 'center', false);
+  drawChar(c, W / 2 - 200, 470, CHAR.mira, { dir: 1, t, sc: 1.6 }); drawChar(c, W / 2 + 200, 470, CHAR.runa, { dir: -1, t, sc: 1.6 });
+  button(c, W / 2 - 130, 280, 260, 50, 'Neues Spiel', startNew, { size: 24 });
+  button(c, W / 2 - 130, 340, 260, 50, 'Weiter', () => { if (loadGame('slvj_auto')) { landKey = ''; ui = null; startMusic(); showToast('Willkommen zurück!'); } }, { size: 24, disabled: !hasSave() });
+  txt(c, 'Linksklick: gehen & benutzen · Rechtsklick: ansehen · Gegenstand anklicken, dann Ziel', W / 2, 430, 15, '#fff', 'center', false);
+}
+
+/* ----- Hauptschleife ----- */
+let last = now(), tSum = 0;
+function loop() {
+  const t = now(), dt = Math.min(.05, t - last); last = t; tSum += dt; btns = [];
+  ctx.clearRect(0, 0, W, H);
+  if (ui === 'title') { drawTitle(ctx, tSum); }
+  else {
+    // Bewegung
+    if (S.target != null) { const d = S.target - S.x; if (Math.abs(d) < 3) { S.target = null; } else { S.dir = Math.sign(d); S.x += Math.sign(d) * Math.min(Math.abs(d), 230 * dt); mira.ph += dt * 14; } } else mira.ph = 0;
+    S.playTime += dt;
+    hover = null; if (!busy && ui === null && !choiceSt && mouse.in) { const os = objects(); const hit = os.filter(o => mouse.x >= o.r[0] && mouse.x <= o.r[0] + o.r[2] && mouse.y >= o.r[1] && mouse.y <= o.r[1] + o.r[3]); hover = hit.length ? hit[hit.length - 1] : null; if (mouse.y > H - 76 && barShown) hover = null; }
+    drawScene(ctx, tSum, dt);
+    if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${flash})`; ctx.fillRect(0, 0, W, H); flash = Math.max(0, flash - dt * 2); }
+    drawHUD(ctx, tSum);
+    if (ui === 'ring') drawRing(ctx, tSum); else if (ui === 'read') drawRead(ctx); else if (ui === 'season') drawSeasonMenu(ctx); else if (ui === 'journal') drawJournal(ctx); else if (ui === 'map') drawMap(ctx, tSum); else if (ui === 'menu') drawMenu(ctx); else if (ui === 'garland') drawGarland(ctx, tSum); else if (ui === 'intro') drawIntro(ctx, tSum); else if (ui === 'ending') drawEnding(ctx, tSum);
+    if (fade > 0) { ctx.fillStyle = `rgba(0,0,0,${fade})`; ctx.fillRect(0, 0, W, H); }
+  }
+  // Cursor
+  if (mouse.in) drawCursor(ctx);
+  requestAnimationFrame(loop);
+}
+function drawCursor(c) {
+  const x = mouse.x, y = mouse.y;
+  if (sel && ui === null) { rrect(c, x - 22, y - 22, 44, 44, 10, 'rgba(255,226,138,.92)', 3); c.font = '28px ' + FONT; c.textAlign = 'center'; c.fillStyle = INK; c.fillText(ITEMS[sel].e, x, y + 10); return; }
+  c.save(); c.translate(x, y);
+  if (hover && hover.kind === 'exit') { const d = hover.dirArrow || 0; c.rotate(d === 0 ? -1.57 : d > 0 ? 0 : 3.14); poly(c, [[-12, -8], [4, -8], [4, -16], [20, 0], [4, 16], [4, 8], [-12, 8]], '#ffe28a', 3); }
+  else { poly(c, [[0, 0], [0, 26], [7, 20], [12, 31], [17, 29], [12, 18], [21, 18]], hover ? '#ffe28a' : '#fff', 2.8); }
+  c.restore();
+}
+
+/* ----- Eingabe ----- */
+function toCanvas(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height }; }
+cv.addEventListener('mousemove', e => { const p = toCanvas(e); mouse.x = p.x; mouse.y = p.y; mouse.in = true; });
+cv.addEventListener('mouseleave', () => { mouse.in = false; });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('mousedown', e => {
+  initAudio(); if (ac && ac.state === 'suspended') ac.resume();
+  const p = toCanvas(e); mouse.x = p.x; mouse.y = p.y; mouse.in = true; const right = e.button === 2;
+  // Buttons/Overlays
+  for (let i = btns.length - 1; i >= 0; i--) { const b = btns[i]; if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { if (b.inv) { invClick(b.inv, right); } else if (!right) { sfx('click'); b.fn(); } return; } }
+  if (ui === 'title' || (ui !== null && ui !== 'inv')) { if (right && ui !== 'title') ui = null; return; }
+  if (choiceSt) return;
+  if (speech) { if (!AUTO && (now() - speech.t0) * 55 < speech.text.length) { speech.t0 = -1e9; return; } const s = speech; speech = null; s.res(); return; }
+  if (busy) return;
+  // Medaillon
+  if (S.hasHeart && Math.hypot(p.x - (W - 46), p.y - (H - 38)) < 30) { if (canSwitch()) ui = 'season'; else noSwitchMsg(); return; }
+  if (right) { if (sel) { sel = null; return; } if (hover) interact(hover, null, 'look'); return; }
+  if (hover) { interact(hover, sel, 'use'); return; }
+  if (sel) { sel = null; return; }
+  if (p.y > 300 && p.y < H - 76 || p.y > 300) S.target = clamp(p.x, SC[S.scene].minX, SC[S.scene].maxX);
+});
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (ui === 'title') return;
+  if (ui === 'intro') { if (k === 'escape') finishIntro(); else if (k === ' ' || k === 'enter') introAdvance(); return; }
+  if (ui === 'ending') { if (k === ' ' || k === 'enter') endAdvance(); return; }
+  if (speech && (k === ' ' || k === 'enter')) { e.preventDefault(); if ((now() - speech.t0) * 55 < speech.text.length) speech.t0 = -1e9; else { const s = speech; speech = null; s.res(); } return; }
+  if (k === 'escape') { ui = ui === null ? (busy ? null : 'menu') : (ui === 'ring' ? (ringDone && ringDone(), ringDone = null, null) : ui === 'read' ? (readDone && readDone(), readDone = null, null) : null); return; }
+  if (busy || choiceSt) { if (k === 'h') showHot = !showHot; return; }
+  if (k === 'j') ui = ui === 'journal' ? null : (ui === null ? 'journal' : ui);
+  else if (k === 'm') ui = ui === 'map' ? null : (ui === null ? 'map' : ui);
+  else if (k === 's' && S.hasHeart) { if (ui === 'season') ui = null; else if (ui === null) { if (canSwitch()) ui = 'season'; else noSwitchMsg(); } }
+  else if (k === 'i') { barSuppress = false; barShown = !barShown; mouse.y = H - 20; }
+  else if (k === 'h') showHot = !showHot;
+  else if (k === 'f') { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); }
+  else if (k === 'f1') { e.preventDefault(); ui = 'menu'; }
+});
+
+/* =====================================================================
+   TEIL 2 – alle weiteren Orte, Rätsel, Intro und Enden
+   ===================================================================== */
+Object.assign(CHAR, {
+  selma: { skin: '#f6d0b0', hair: '#8a5a2a', style: 'braid', top: '#4aa84a', bot: '#6a4a2a', boots: '#3a2418', skirt: true, sc: .98, scarf: '#ffe070' },
+  nim: { skin: '#c99a70', hair: '#3a6a2a', style: 'pony', top: '#7ac04a', bot: '#4a6a2a', boots: '#3a2418', skirt: true, sc: .98 },
+  orin: { skin: '#e6b98e', hair: '#dcdcf0', style: 'short', top: '#3a4ab0', bot: '#2a2a70', boots: '#2a1a18', hat: 'wiz', beard: '#dcdcf0', sc: 1.02 },
+  fenn: { skin: '#e0a878', hair: '#7a4a2a', style: 'short', top: '#e8902a', bot: '#7a4a2a', boots: '#4a2a18', hat: 'cap', stache: '#7a4a2a', sc: 1 },
+  brann: { skin: '#e8b890', hair: '#5a4a3a', style: 'short', top: '#8a96a8', bot: '#5a6a7a', boots: '#3a2a20', hat: 'helm', sword: true, sc: 1.06 },
+  ansgar: { skin: '#e0b08a', hair: '#bfbfc8', style: 'short', top: '#8a7a5a', bot: '#5a4a3a', boots: '#3a2a20', hat: 'miner', beard: '#bfbfc8', sc: .94 },
+  corvin: { skin: '#eec8a0', hair: '#3a2a3a', style: 'short', top: '#7a3aa8', bot: '#4a2a68', boots: '#2a1a28', stache: '#3a2a3a', hat: 'crown', sc: 1.04 },
+  elias: { skin: '#e6be96', hair: '#9a9a9a', style: 'short', top: '#3aa050', bot: '#3a6a3a', boots: '#4a2a18', beard: '#a8a8a8', hat: 'wiz2', sc: 1 },
+  aveline: { skin: '#f6d0b0', hair: '#c08a4a', style: 'pony', top: '#e07098', bot: '#c05078', boots: '#5a3a28', skirt: true, sc: 1 }
+});
+
+Object.assign(ITEMS, {
+  kristall: { n: 'Wegkristall', e: '🔮', d: 'Nims Wegkristall aus den Wurzeln der Weide. Er bringt mich zu jedem Ort, den ich schon kenne. (Anklicken: Karte)', direct: true },
+  girlanden: { n: 'Klanggirlanden', e: '🎀', d: 'Drei Girlanden aus getrockneten Beeren: violett, grün und gelb. Sie klingen, wenn der Wind sie bewegt.' },
+  pflVio: { n: 'Violette Pflanze', e: '🪻', d: 'Eine Topfpflanze mit violetten Knospen.' },
+  pflGruen: { n: 'Dunkelgrüne Pflanze', e: '🌿', d: 'Eine buschige, dunkelgrüne Topfpflanze.' },
+  pflSilber: { n: 'Silberfarn', e: '🍃', d: 'Ein silbrig-heller Farn im Tontopf.' },
+  pflOliv: { n: 'Olivkraut', e: '🪴', d: 'Ein olivfarbenes Kraut mit kleinen Knospen.' },
+  stein: { n: 'Kantiger Stein', e: '🪨', d: 'Ein faustgroßer, kantiger Granitbrocken. Taugt als Drehpunkt für einen Hebel.' },
+  scherbe: { n: 'Porzellanscherbe', e: '🥣', d: 'Ansgars Strichtafel: eine Scherbe mit rauer, unglasierter Unterseite. Reibt man Erz darüber, zeigt der Strich die wahre Farbe des Pulvers.' },
+  hacke: { n: 'Spitzhacke', e: '⚒️', d: 'Ansgars Spitzhacke. Schwer, aber scharf.' },
+  haematit: { n: 'Hämatit', e: '🩸', d: 'Blutstein – Eisenerz mit kirschrotem Strich. Daraus kann Runa Sternstahl machen.' },
+  eimer: { n: 'Holzeimer', e: '🪣', d: 'Ein Eichenholzeimer von Fenn. "Fast dicht", sagt er.' },
+  eimerSaft: { n: 'Eimer mit Birkensaft', e: '🍯', d: 'Klarer, leicht süßer Birkensaft, frisch aus dem Stamm.' },
+  flasche: { n: 'Glasflasche', e: '🍼', d: 'Eine saubere, leere Glasflasche aus Elias\' Kräuterlager.' },
+  flascheSee: { n: 'Flasche Seewasser', e: '💧', d: 'Gewöhnliches Seewasser. (Anklicken: ausgießen)', direct: true },
+  flascheQuelle: { n: 'Quellwasser', e: '♨️', d: 'Lauwarmes Wasser aus der Quelle unter dem Eis. Es gefriert nicht einmal im tiefsten Winter.' },
+  zunder: { n: 'Feuerstein & Zunder', e: '🪔', d: 'Feuerstein, ein Schlageisen und trockener Zunder aus Elias\' Kiste.' },
+  trank: { n: 'Klarsicht-Trank', e: '🧪', d: 'Ein grünlich schimmernder Trank. Elias schrieb, er lasse einen durch jeden Nebel sehen. (Am Nebelpfad benutzen)' },
+  nadel: { n: 'Nadel & Garn', e: '🪡', d: 'Selmas Segelnadel mit gewachstem Garn.' },
+  flicken: { n: 'Flicken', e: '🩹', d: 'Das Leinentuch, ringsum mit festem Garn versäumt. Ein Flicken für etwas Großes.' },
+  stroh: { n: 'Strohgarben', e: '🌾', d: 'Trockene Strohgarben vom Erntefeld. Brennt schnell und heiß – der Brennstoff der ersten Ballonfahrer.' },
+  dose: { n: 'Blechdose', e: '🥫', d: 'Eine verrostete Blechdose aus dem Storchennest. Der Deckel sitzt fest.' },
+  tagebuch: { n: 'Avelines Tagebuch', e: '📕', d: 'Avelines Tagebuch in rotem Leder. (Anklicken zum Lesen)', direct: true },
+  siegelFr: { n: 'Frühlingssiegel', e: '🌸', d: 'Das Siegel des Frühlings. Es duftet nach Regen und Blüten.' },
+  siegelSo: { n: 'Sommersiegel', e: '☀️', d: 'Das Siegel des Sommers. Es ist warm wie ein Sonnenstein.' },
+  siegelHe: { n: 'Herbstsiegel', e: '🍂', d: 'Das Siegel des Herbstes. Es raschelt leise wie Laub.' },
+  siegelWi: { n: 'Wintersiegel', e: '❄️', d: 'Das Siegel des Winters. Es ist kalt und still.' }
+});
+ITEMS.tuch.d = 'Ein Leinentuch von der Wäscheleine. Steif gefroren.';
+
+function drawSkyStatic() { }
+const NAMES = { mira: 'Mira', runa: 'Runa', tovin: 'Tovin', lio: 'Lio', hedda: 'Hedda', selma: 'Selma', nim: 'Nim', orin: 'Orin', fenn: 'Fenn', brann: 'Brann', ansgar: 'Ansgar', corvin: 'Corvin', elias: 'Elias' };
+
+/* ---------- zusätzliche Mal-Helfer ---------- */
+function rockShape(c, x, y, w, h, col, seed, snow) {
+  const r = R(seed);
+  poly(c, [[x - w / 2, y], [x - w * .5 + r() * 8, y - h * .5], [x - w * .25, y - h * (.85 + r() * .15)], [x + w * .1, y - h], [x + w * .42, y - h * .7], [x + w / 2, y - h * .3], [x + w / 2, y]], col, 3.5);
+  c.fillStyle = 'rgba(20,10,40,.22)'; c.beginPath(); c.moveTo(x + w * .1, y - h); c.lineTo(x + w * .42, y - h * .7); c.lineTo(x + w / 2, y - h * .3); c.lineTo(x + w / 2, y); c.lineTo(x + w * .1, y); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.22)'; c.beginPath(); c.moveTo(x - w * .25, y - h * .85); c.lineTo(x + w * .1, y - h); c.lineTo(x - w * .05, y - h * .6); c.fill();
+  if (snow) poly(c, [[x - w * .25, y - h * .85], [x + w * .1, y - h], [x + w * .42, y - h * .7], [x + w * .2, y - h * .62], [x, y - h * .7], [x - w * .2, y - h * .62]], '#fff', 2.5);
+}
+function lakeShape(c, se, x0, y0, x1, y1) {
+  c.beginPath(); c.moveTo(x0, y0 + 14); for (let x = x0; x <= x1; x += 20) c.lineTo(x, y0 + Math.sin(x / 40) * 4); c.lineTo(x1, y1); c.lineTo(x0, y1); c.closePath();
+  c.fillStyle = se === 'wi' ? grad(c, 0, y0, 0, y1, ['#e6f4fc', '#bfdcf0']) : grad(c, 0, y0, 0, y1, ['#63c0ec', '#2f86c8']); c.fill(); stroke(c, 3.5);
+  c.strokeStyle = se === 'wi' ? 'rgba(90,140,190,.6)' : 'rgba(255,255,255,.65)'; c.lineWidth = 2.5;
+  const r = R(4); for (let i = 0; i < 16; i++) { const x = x0 + r() * (x1 - x0), y = y0 + 16 + r() * (y1 - y0 - 20); c.beginPath(); c.moveTo(x, y); if (se === 'wi') c.lineTo(x + 24 + r() * 20, y + (r() - .5) * 8); else c.quadraticCurveTo(x + 10, y - 4, x + 22, y); c.stroke(); }
+}
+function willow(c, x, y, s, se) {
+  const P = PAL[se], r = R(5);
+  poly(c, [[x - 26 * s, y], [x - 16 * s, y - 90 * s], [x - 24 * s, y - 150 * s], [x + 12 * s, y - 130 * s], [x + 22 * s, y - 160 * s], [x + 16 * s, y - 80 * s], [x + 28 * s, y]], P.trunk, 3.5);
+  const col = se === 'wi' ? '#8a7a5a' : se === 'he' ? '#d8a038' : P.leaf;
+  blob(c, x, y - 190 * s, 120 * s, 52 * s, se === 'wi' ? '#eaf2f9' : col, 6, 3.5);
+  for (let i = 0; i < 26; i++) { const sx = x - 130 * s + i * 10 * s, len = (100 + r() * 60) * s, top = y - 175 * s + Math.abs(i - 13) * 2 * s; c.beginPath(); c.moveTo(sx, top); c.quadraticCurveTo(sx + 6 * s, top + len / 2, sx + (r() - .5) * 20 * s, top + len); c.lineWidth = 6; c.strokeStyle = INK; c.stroke(); c.lineWidth = 3; c.strokeStyle = se === 'wi' ? '#9a8a6a' : mix(col, '#2a7a3a', r() * .4); c.stroke(); }
+}
+function birch(c, x, y, s, se, seed) {
+  const P = PAL[se], r = R(seed);
+  poly(c, [[x - 9 * s, y], [x - 6 * s, y - 100 * s], [x - 10 * s, y - 150 * s], [x + 7 * s, y - 150 * s], [x + 6 * s, y - 100 * s], [x + 10 * s, y]], '#f4f0e6', 3.2);
+  c.fillStyle = INK; for (let i = 0; i < 6; i++) { c.fillRect(x - 6 * s + r() * 6 * s, y - (12 + i * 22) * s, 6 * s, 3 * s); }
+  if (se === 'wi') { line(c, [[x, y - 120 * s], [x - 34 * s, y - 160 * s]], INK, 3); line(c, [[x, y - 110 * s], [x + 30 * s, y - 150 * s]], INK, 3); return; }
+  const col = se === 'he' ? '#f0c030' : se === 'fr' ? '#a8e070' : P.leaf;
+  [[-22, -158, 26, 22], [20, -164, 28, 22], [0, -184, 30, 24], [-6, -140, 34, 20]].forEach((p, i) => blob(c, x + p[0] * s, y + p[1] * s, p[2] * s, p[3] * s, mix(col, '#ffffff', i % 2 * .15), seed + i, 3));
+}
+function castle(c, x, y, s, col = '#c8b8d8', roof = '#7a3a90') {
+  poly(c, [[x - 120 * s, y], [x - 120 * s, y - 120 * s], [x + 120 * s, y - 120 * s], [x + 120 * s, y]], col, 3.5);
+  for (let i = 0; i < 8; i++) rrect(c, x - 120 * s + i * 32 * s, y - 136 * s, 20 * s, 18 * s, 2, col, 3);
+  [[-120, 170], [120, 170], [0, 230]].forEach(([dx, h]) => { const tx = x + dx * s; poly(c, [[tx - 30 * s, y], [tx - 30 * s, y - h * s], [tx + 30 * s, y - h * s], [tx + 30 * s, y]], col, 3.5); poly(c, [[tx - 40 * s, y - h * s], [tx, y - (h + 70) * s], [tx + 40 * s, y - h * s]], roof, 3.5); rrect(c, tx - 7 * s, y - (h - 40) * s, 14 * s, 28 * s, 6, '#ffe28a', 2.5); });
+  poly(c, [[x - 28 * s, y], [x - 28 * s, y - 60 * s], [x, y - 84 * s], [x + 28 * s, y - 60 * s], [x + 28 * s, y]], '#4a3050', 3.5);
+}
+function angelStatue(c, x, y, s) {
+  rrect(c, x - 26 * s, y - 30 * s, 52 * s, 30 * s, 3, '#b8b8c4', 3.5);
+  poly(c, [[x - 16 * s, y - 30 * s], [x - 10 * s, y - 90 * s], [x + 10 * s, y - 90 * s], [x + 16 * s, y - 30 * s]], '#d8d8e4', 3.5);
+  poly(c, [[x - 8 * s, y - 84 * s], [x - 50 * s, y - 130 * s], [x - 30 * s, y - 70 * s]], '#e8e8f2', 3); poly(c, [[x + 8 * s, y - 84 * s], [x + 50 * s, y - 130 * s], [x + 30 * s, y - 70 * s]], '#e8e8f2', 3);
+  blob(c, x, y - 100 * s, 12 * s, 12 * s, '#e8e8f2', 9, 3, false);
+}
+function graveStone(c, x, y, s = 1, cross = true) {
+  poly(c, [[x - 20 * s, y], [x - 20 * s, y - 50 * s], [x, y - 66 * s], [x + 20 * s, y - 50 * s], [x + 20 * s, y]], '#b0b0bc', 3.5);
+  if (cross) { line(c, [[x, y - 54 * s], [x, y - 28 * s]], INK, 3); line(c, [[x - 8 * s, y - 44 * s], [x + 8 * s, y - 44 * s]], INK, 3); }
+}
+function balloonEnv(c, x, y, s, patched, t) {
+  const cols = ['#e8503a', '#f4d03a', '#3a8ae8', '#f4d03a', '#e8503a'];
+  c.save(); c.beginPath(); c.ellipse(x, y, 95 * s, 115 * s, 0, 0, 7); c.clip();
+  cols.forEach((cl, i) => { c.fillStyle = cl; c.fillRect(x - 95 * s + i * 38 * s, y - 120 * s, 38 * s, 240 * s); });
+  c.fillStyle = 'rgba(20,10,40,.2)'; c.beginPath(); c.ellipse(x + 40 * s, y + 20 * s, 90 * s, 115 * s, 0, 0, 7); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.28)'; c.beginPath(); c.ellipse(x - 40 * s, y - 50 * s, 26 * s, 42 * s, -.4, 0, 7); c.fill();
+  c.restore(); c.beginPath(); c.ellipse(x, y, 95 * s, 115 * s, 0, 0, 7); stroke(c, 4);
+  if (patched) { poly(c, [[x - 30 * s, y - 20 * s], [x + 14 * s, y - 30 * s], [x + 30 * s, y + 6 * s], [x - 10 * s, y + 20 * s]], '#f0ede4', 3); c.strokeStyle = '#8a6a30'; c.lineWidth = 1.5; c.setLineDash([4, 3]); c.strokeRect(x - 24 * s, y - 16 * s, 46 * s, 30 * s); c.setLineDash([]); }
+  else { poly(c, [[x - 30 * s, y - 20 * s], [x + 10 * s, y - 34 * s], [x + 34 * s, y + 4 * s], [x - 6 * s, y + 24 * s]], '#20122a', 3); }
+}
+
+/* ---------- Figuren-Helfer ---------- */
+function npc(id, name, x, dir, walk, face, lookTxt, use, extra = {}) {
+  const ch = CHAR[id], s = ch.sc;
+  return Object.assign({
+    id, actor: id, name, r: [x - 32, 470 - 108 * s, 64, 110 * s], walk, face, head: [x, 470 - 108 * s],
+    draw(c, t) { drawChar(c, x, 470, ch, { dir, t, talk: speech && speech.who === id }); },
+    look: async () => say('mira', lookTxt), use
+  }, extra);
+}
+
+/* =====================================================================
+   BERGPFAD
+   ===================================================================== */
+SC.bergpfad = {
+  id: 'bergpfad', title: 'Bergpfad', natural: 'so', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 190, 31, P.mtn2, true); mountains(c, P, 260, 32, P.mtn, true); groundBase(c, P, se);
+    poly(c, [[700, 330], [760, 250], [860, 270], [960, 210], [960, 412], [700, 412]], '#8f8a96', 3.5); poly(c, [[860, 270], [960, 210], [960, 412], [890, 412]], 'rgba(20,10,40,.2)', 0);
+    for (let i = 0; i < 8; i++) pine(c, 40 + i * 100 + (i % 2) * 30, 380 + (i % 3) * 6, .6 + (i % 3) * .12, se, 50 + i);
+    rockShape(c, 90, 470, 90, 60, '#9a95a4', 61, se === 'wi'); rockShape(c, 890, 476, 100, 70, '#8f8a96', 62, se === 'wi');
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    if (!has('stein') && !F('steinPos') && !F('blockWeg')) list.push({
+      id: 'stein', name: 'Kantiger Stein', r: [270, 440, 60, 40], walk: 300,
+      draw(c) { rockShape(c, 300, 476, 44, 30, '#a8a2b0', 71, false); },
+      look: async () => say('mira', 'Ein faustgroßer, kantiger Granitbrocken. Der taugt als Drehpunkt für einen Hebel.'),
+      use: async () => { give('stein'); await say('mira', 'Der Stein liegt schwer und stabil in der Hand.'); }
+    });
+    if (!F('blockWeg')) list.push({
+      id: 'block', name: 'Felsblock', r: [560, 380, 150, 100], walk: 500, face: 1,
+      draw(c) {
+        rockShape(c, 640, 476, 130, 90, '#9a95a4', 77, se === 'wi');
+        if (F('steinPos')) { const off = [.2, .5, 1, 1.6][S.flags.steinPos - 1]; rockShape(c, 575 - off * 30, 480, 30, 20, '#b8b2c0', 72, false); }
+      },
+      look: async () => say('mira', 'Ein Felsblock versperrt den Pfad. Etwa 80 × 50 × 45 cm groß. Granit wiegt rund 2,7 Tonnen pro Kubikmeter – der Block also knapp 480 Kilo. Zum Kippen müsste ich nur die Hälfte stemmen: gut 240 Kilo. Das schaffe ich nie mit bloßen Händen. Ich schaffe etwa 35 Kilo.'),
+      use: async () => {
+        if (F('steinPos')) { S.flags.steinPos = 0; give('stein'); return say('mira', 'Ich hebe den Stein wieder auf, um ihn anders zu legen.'); }
+        await say('mira', 'Ich stemme mich dagegen. Der Block ist unbeeindruckt. Kraft × Kraftarm = Last × Lastarm – ich brauche einen Hebel.');
+      },
+      items: {
+        stein: async () => {
+          if (F('steinPos')) return;
+          await say('mira', 'Der Stein soll der Drehpunkt sein. Wie weit vom Block entfernt lege ich ihn hin? (Die Stange ist 2 m lang.)');
+          const i = await choice(['Direkt am Block (20 cm)', 'Etwas weiter weg (50 cm)', 'In der Mitte der Stange (1 m)', 'Fast am Ende (1,6 m)']);
+          take('stein'); S.flags.steinPos = i + 1; sfx('use'); await say('mira', 'Der Stein liegt. Jetzt fehlt noch die Stange.');
+        },
+        stange: async () => {
+          if (!F('steinPos')) { sfx('fail'); return say('mira', 'Ohne Drehpunkt rutscht die Stange nur ab. Ich brauche einen Stein als Auflage.'); }
+          const f = [27, 80, 240, 960][S.flags.steinPos - 1];
+          if (f <= 35) { setF('blockWeg'); sfx('success'); await say('mira', 'Ich schiebe die Stange unter den Block und lehne mich auf das Ende … Der lange Arm gewinnt: Mit nur rund ' + f + ' Kilo Druck kippt der Block – und rumpelt den Hang hinunter!'); insight_hebel(); }
+          else { sfx('fail'); await say('mira', 'Bei diesem Abstand müsste ich mit ' + f + ' Kilo drücken – ich schaffe nur etwa 35. Der Block rührt sich nicht. Ich muss den Stein anders legen (Block anklicken, um ihn zurückzuholen).'); }
+        }
+      }
+    });
+    list.push(edgeExit('l', 'werkstatt', 'Zur Werkstatt', 840, null));
+    list.push(edgeExit('r', 'grube', 'Zur Erzgrube', 110, () => F('blockWeg'), 'Der Felsblock versperrt den Pfad. Ich muss ihn irgendwie beiseite bekommen.'));
+    return list;
+  },
+  async onEnter() { if (!F('introBerg')) { setF('introBerg'); await say('mira', 'Der Bergpfad. Frische Luft, steile Hänge – und ein Felsblock, der mitten im Weg liegt.'); } }
+};
+function insight_hebel() { note('Hebelgesetz: Kraft × Kraftarm = Last × Lastarm. Je näher der Drehpunkt an der Last, desto weniger Kraft brauche ich.'); }
+
+/* =====================================================================
+   ERZGRUBE
+   ===================================================================== */
+const ORES = [
+  { id: 'limonit', n: 'Rostbraunes Erz', col: '#a8703a', streak: 'gelbbraun' },
+  { id: 'pyrit', n: 'Goldglänzendes Erz', col: '#d8b83a', streak: 'grünlich-schwarz' },
+  { id: 'haematit', n: 'Graurötliches Erz', col: '#8a6a72', streak: 'kirschrot' },
+  { id: 'azurit', n: 'Bläuliches Erz', col: '#5a86c0', streak: 'hellblau' }
+];
+const ORE_NAME = { limonit: 'Limonit', pyrit: 'Pyrit (Katzengold)', haematit: 'Hämatit', azurit: 'Azurit' };
+SC.grube = {
+  id: 'grube', title: 'Alte Erzgrube', natural: 'so', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 220, 41, '#8a8794', se === 'wi'); groundBase(c, P, se);
+    for (let i = 0; i < 4; i++) poly(c, [[i * 250 - 20, 410], [i * 250 + 30, 330 - (i % 2) * 30], [i * 250 + 170, 330 - (i % 2) * 30], [i * 250 + 240, 410]], i % 2 ? '#9a96a4' : '#8a8694', 3.5);
+    for (let i = 0; i < 3; i++) { rrect(c, 320 + i * 190, 300, 12, 116, 2, '#8a5a30', 3); rrect(c, 320 + i * 190, 300, 190, 12, 2, '#a06a38', 3); }
+    line(c, [[0, 500], [W, 500]], '#5a4a3a', 4);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push(npc('ansgar', 'Ansgar', 240, 1, 320, -1, 'Ansgar, ein alter Bergmann mit Grubenlampe und Schnurrbart. Er sieht aus, als wäre er selbst aus Fels gehauen.', () => ansgarTalk()));
+    ORES.forEach((o, i) => {
+      const x = 470 + i * 100;
+      list.push({
+        id: 'erz_' + o.id, name: 'Erzhaufen', r: [x - 44, 425, 88, 55], walk: x, face: 1,
+        draw(c) { blob(c, x, 466, 44, 24, o.col, 90 + i, 3.5); [[-16, -6], [12, -10], [0, 2]].forEach((p, k) => rockShape(c, x + p[0], 468 + p[1], 22, 16, mix(o.col, '#ffffff', .18), 100 + i * 3 + k, false)); if (o.id === 'pyrit') { c.fillStyle = 'rgba(255,255,200,.9)'; c.fillRect(x - 12, 446, 3, 3); c.fillRect(x + 10, 452, 3, 3); } },
+        look: async () => say('mira', 'Ein Haufen ' + o.n.toLowerCase() + 's. ' + (F('strich_' + o.id) ? 'Strichprobe: ' + o.streak + '.' : 'Nur am Aussehen erkenne ich es nicht sicher – ich brauche die Strichprobe.')),
+        use: async () => say('mira', 'Ich prüfe das Erz mit den Fingern. Schwer, kalt, staubig. Ohne Strichprobe rate ich nur.'),
+        items: {
+          scherbe: async () => { setF('strich_' + o.id); sfx('use'); await say('mira', 'Ich reibe das Erz über die raue Scherbe – der Strich ist ' + o.streak + '.'); if (o.id === 'haematit') { await say('mira', 'Kirschrot! Das ist Hämatit, der Blutstein.'); note('Strichprobe: Limonit gelbbraun, Hämatit kirschrot, Pyrit grünlich-schwarz, Azurit hellblau.'); } },
+          hacke: async () => {
+            if (o.id === 'haematit') { if (has('haematit')) return say('mira', 'Ich habe schon genug.'); give('haematit'); sfx('success'); await say('mira', 'Ich schlage mit der Spitzhacke ein paar Brocken Hämatit heraus. Schwer – aber genau das, was Runa braucht.'); await say('ansgar', 'Glück auf, Mädchen! Gut gemacht.'); insight('Ein Stollen, den nur einer kennt, stürzt ein – Wissen muss man teilen.'); return; }
+            sfx('fail'); await say('ansgar', 'Halt! Das ist ' + ORE_NAME[o.id] + ', kein Hämatit. Mach erst die Strichprobe.');
+          }
+        }
+      });
+    });
+    list.push(edgeExit('l', 'bergpfad', 'Zum Bergpfad', 850, null));
+    return list;
+  },
+  async onEnter() { if (!F('introGrube')) { setF('introGrube'); await say('ansgar', 'Glück auf! Selten, dass sich jemand hierher verirrt.'); await say('mira', 'Ich suche Hämatit für eine Schmiedin. Vier Erzhaufen – welcher ist der richtige?'); } }
+};
+async function ansgarTalk() {
+  await talkLoop([
+    { t: 'Welches Erz ist Hämatit?', show: () => !F('scherbeHat'), fn: async () => { await say('ansgar', 'Nach der Farbe geht das nicht. Nimm die Strichprobe: Reib das Erz über rauen Porzellanscherben – der Strich verrät die wahre Farbe des Pulvers.'); give('scherbe'); setF('scherbeHat'); note('Strichprobe: Erz über die unglasierte Scherbe reiben. Hämatit streicht kirschrot.'); } },
+    { t: 'Darf ich deine Spitzhacke leihen?', show: () => F('scherbeHat') && !F('hackeHat'), fn: async () => { await say('ansgar', 'Leihen ja – aber bring sie zurück! Ich hab sie seit dreißig Jahren.'); give('hacke'); setF('hackeHat'); } },
+    { t: 'Was machst du hier?', show: () => true, fn: async () => say('ansgar', 'Ich horche auf den Berg. Er redet, wenn man still ist. Meistens sagt er: "Mehr Stützbalken."') }
+  ]);
+}
+
+/* =====================================================================
+   SELMAS GARTEN
+   ===================================================================== */
+const PFL = {
+  pflGruen: { n: 'Dunkelgrüne Pflanze', open: 'fr', col: '#2f8a3a', bloom: '#ffb6d1' },
+  pflVio: { n: 'Violette Pflanze', open: 'so', col: '#7a4ab8', bloom: '#c890ff' },
+  pflOliv: { n: 'Olivkraut', open: 'he', col: '#8a8a3a', bloom: '#e0d050' },
+  pflSilber: { n: 'Silberfarn', open: 'wi', col: '#b8c8d0', bloom: '#ffffff' }
+};
+const SOCKEL_OK = ['pflGruen', 'pflVio', 'pflOliv', 'pflSilber'], SOCKEL_SE = ['fr', 'so', 'he', 'wi'];
+function plantArt(c, x, y, id, se, s = 1) {
+  const p = PFL[id], open = se === p.open;
+  poly(c, [[x - 15 * s, y - 24 * s], [x + 15 * s, y - 24 * s], [x + 11 * s, y], [x - 11 * s, y]], '#c8723a', 3);
+  for (let i = -2; i <= 2; i++) { thick(c, [[x, y - 24 * s], [x + i * 8 * s, y - 50 * s + Math.abs(i) * 5 * s]], p.col, 5 * s); }
+  for (let i = -2; i <= 2; i++) { const bx = x + i * 8 * s, by = y - 52 * s + Math.abs(i) * 5 * s; if (open) { for (let k = 0; k < 5; k++) { const a = k / 5 * 6.28; blob(c, bx + Math.cos(a) * 5 * s, by + Math.sin(a) * 5 * s, 4.5 * s, 4.5 * s, p.bloom, k, 1.8, false); } ellip(c, bx, by, 3.2 * s, 3.2 * s, '#ffd84a', 1.8); } else blob(c, bx, by, 4.5 * s, 6 * s, mix(p.col, '#000000', .2), 2, 2, false); }
+}
+SC.garten = {
+  id: 'garten', title: 'Selmas Garten', natural: 'so', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 240, 51, P.mtn, se !== 'he'); groundBase(c, P, se);
+    for (let i = 0; i < 20; i++) rrect(c, i * 50 - 10, 388, 50, 40, 3, i % 2 ? '#d8c8a8' : '#e6d8b8', 2.5);
+    rrect(c, 0, 380, W, 12, 3, '#c8b898', 3);
+    [130, 830].forEach((x, i) => { poly(c, [[x - 22, 430], [x - 8, 250], [x, 210], [x + 8, 250], [x + 22, 430]], se === 'wi' ? '#c8e0d0' : '#2a7a3a', 3.5); });
+    for (let i = 0; i < 6; i++) { const x = 60 + i * 150; bush(c, x, 428, .7, se, 120 + i); if (se !== 'wi') for (let k = 0; k < 4; k++) { c.fillStyle = ['#ff8ab0', '#ffd84a', '#c890ff', '#ff9a4a'][(i + k) % 4]; c.beginPath(); c.arc(x - 20 + k * 14, 412 - (k % 2) * 10, 5, 0, 7); c.fill(); stroke(c, 1.5); } }
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push(npc('selma', 'Selma', 200, 1, 260, -1, 'Selma, die Gartenhüterin. Sie hat Erde unter den Fingernägeln und Sonne im Gesicht.', () => selmaTalk()));
+    // Pflanzenregal
+    let px = 330;
+    Object.keys(PFL).forEach((id, i) => {
+      if (F('pflWeg_' + id) || F('pflSetzt_' + id)) return; const x = px + i * 46;
+      list.push({
+        id: 'pfl_' + id, name: PFL[id].n, r: [x - 18, 410, 40, 62], walk: x, face: 1,
+        draw(c) { plantArt(c, x, 472, id, se, .95); },
+        look: async () => say('mira', PFL[id].n + ': ' + (se === PFL[id].open ? 'Die Knospen öffnen sich weit und blühen richtig auf.' : (id === 'pflSilber' ? 'Der Silberfarn bleibt fest geschlossen, solange es warm ist.' : 'Die Knospen bleiben fest geschlossen. Die Pflanze wartet auf ihre Zeit.'))),
+        use: async () => { setF('pflWeg_' + id); give(id); await say('mira', 'Ich nehme den Topf auf. Ihm scheint es hier eigentlich gut zu gefallen.'); }
+      });
+    });
+    SOCKEL_OK.forEach((pid, i) => {
+      const x = 560 + i * 90, placed = F('pflSetzt_' + pid);
+      list.push({
+        id: 'sockel' + i, name: 'Sockel', r: [x - 34, 400, 70, 78], walk: x, face: 1,
+        draw(c) {
+          rrect(c, x - 26, 446, 52, 28, 4, '#b8b8c8', 3.5); rrect(c, x - 32, 438, 64, 12, 4, '#d0d0dc', 3.5);
+          const sy = 400; ellip(c, x, 416, 16, 16, SEASON_COL[SOCKEL_SE[i]], 3); c.font = '20px ' + FONT; c.textAlign = 'center'; c.fillStyle = INK; c.fillText(SEASON_ICON[SOCKEL_SE[i]], x, 423);
+          if (placed) plantArt(c, x, 440, pid, se, .9);
+        },
+        look: async () => say('mira', 'Ein Sockel mit dem Zeichen für ' + SEASONS[SOCKEL_SE[i]] + '. ' + (placed ? 'Die passende Pflanze steht schon darauf.' : 'Hier gehört eine Pflanze hin, die in dieser Jahreszeit erblüht.')),
+        use: async () => say('mira', 'Ich streiche über das Symbol. Es fühlt sich an, als wartete es auf jemanden.'),
+        items: Object.fromEntries(Object.keys(PFL).map(id => [id, async () => {
+          if (placed) return;
+          if (id === pid) {
+            take(id); setF('pflSetzt_' + id); sfx('success'); await say('mira', 'Die ' + PFL[id].n + ' steht auf dem ' + SEASONS[SOCKEL_SE[i]] + '-Sockel – und leuchtet kurz auf. Richtig!');
+            if (SOCKEL_OK.every(k => F('pflSetzt_' + k))) { setF('gartenOk'); await say('selma', 'Wunderbar! Alle vier Pflanzen an ihrem Platz – jede in ihrer Zeit. Du hast ein Auge dafür!'); give('girlanden'); await say('selma', 'Hier, meine Klanggirlanden. Drei Stück, violett, grün und gelb. Sie klingen im Wind. Vielleicht hilft dir das bei der Baumhüterin.'); insight('Wachstum lässt sich nicht erzwingen – jeder Garten braucht jemanden, der ihn kennt.'); note('Selma: Die Klanggirlanden gehören an den Ast der Weide im Weidenhain.'); }
+          } else { sfx('fail'); await say('mira', 'Ich stelle die ' + PFL[id].n + ' hin – und ihre Knospen schließen sich bockig. Falsche Jahreszeit! Ich nehme sie wieder mit.'); }
+        }]))
+      });
+    });
+    list.push(edgeExit('l', 'werkstatt', 'Zur Werkstatt', 380, null));
+    list.push(edgeExit('r', 'weide', 'Zum Weidenhain', 110, null));
+    return list;
+  },
+  async onEnter() { if (!F('introGarten')) { setF('introGarten'); await say('mira', 'Ein ummauerter Kräutergarten – wunderschön. Aber die Pflanzen sehen aus, als wüssten sie nicht, welche Jahreszeit sie haben.'); } }
+};
+const SEASON_COL = { fr: '#ffd0e0', so: '#fff0a0', he: '#ffc080', wi: '#d8ecfa' };
+async function selmaTalk() {
+  if (!F('selmaMet')) { setF('selmaMet'); await say('selma', 'Oh, Besuch! Ich bin Selma, die Gartenhüterin. Meine Pflanzen sind durcheinander – alle Jahreszeiten auf einmal, und keine weiß mehr, wann sie blühen soll.'); }
+  await talkLoop([
+    { t: 'Wie kann ich helfen?', show: () => !F('gartenOk'), fn: async () => { await say('selma', 'Vier Sockel, vier Pflanzen. Jede gehört zu der Jahreszeit, in der sie erblüht. Beobachte sie, während du das Herz drehst – und stell jede auf ihren Platz.'); note('Selma: Jede Pflanze auf den Sockel ihrer Blütezeit stellen. Zum Beobachten die Jahreszeit umschalten.'); } },
+    { t: 'Kann ich Nadel und Garn von dir haben?', show: () => F('gartenOk') && !F('nadelHat'), fn: async () => { await say('selma', 'Natürlich, du hast mir doch geholfen. Meine Segelnadel – halt sie in Ehren.'); give('nadel'); setF('nadelHat'); } },
+    { t: 'Erzähl mir vom Garten.', show: () => true, fn: async () => say('selma', 'Ein Garten ist wie ein Gespräch: Man muss zuhören, bevor man etwas sagt.') }
+  ]);
+}
+
+/* =====================================================================
+   WEIDENHAIN
+   ===================================================================== */
+const GIRL = { violett: '#9a4ad8', gelb: '#f0d030', gruen: '#4ac05a' };
+SC.weide = {
+  id: 'weide', title: 'Weidenhain', natural: 'so', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) { mountains(c, P, 250, 61, P.mtn, se !== 'he'); groundBase(c, P, se); willow(c, 470, 440, 1.4, se); tree(c, 60, 430, .6, se, 63); tree(c, 900, 430, .6, se, 64); },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push({
+      id: 'nim', actor: 'nim', name: 'Nim', r: [380, 395, 100, 78], walk: 350, face: 1, head: [F('nimWach') ? 520 : 430, 400],
+      draw(c, t) { if (F('nimWach')) drawChar(c, 520, 470, CHAR.nim, { dir: -1, t, talk: speech && speech.who === 'nim' }); else { c.save(); c.translate(430, 462); c.rotate(-1.5); drawChar(c, 0, 0, CHAR.nim, { dir: 1, t: 0 }); c.restore(); txt(c, 'Zzz', 470, 405 - Math.sin(t * 2) * 5, 22, '#fff', 'left'); } },
+      look: async () => say('mira', F('nimWach') ? 'Nim, die Baumhüterin. Ihr Blick ist so tief wie ein alter Wald.' : 'Eine junge Frau schläft tief unter der Trauerweide. Sie lässt sich nicht wecken – der Schlaf des Waldes ist zu tief.'),
+      use: async () => nimTalk()
+    });
+    list.push({
+      id: 'ast', name: 'Ast der Weide', r: [330, 240, 300, 110], walk: 470, face: 1,
+      draw(c, t) {
+        if (F('girlHang')) S.girl.forEach((g, i) => { const x = 380 + i * 90, y = 300; c.beginPath(); c.moveTo(x - 30, y - 20); c.quadraticCurveTo(x, y + 30, x + 30, y - 20); c.lineWidth = 8; c.strokeStyle = INK; c.stroke(); c.lineWidth = 4; c.strokeStyle = GIRL[g]; c.stroke(); for (let k = 0; k < 5; k++) { c.fillStyle = mix(GIRL[g], '#ffffff', .2); c.beginPath(); c.arc(x - 20 + k * 10, y - 2 + Math.sin(k / 4 * 3.14) * 12 + Math.sin(t * 2 + k) * 1.5, 4, 0, 7); c.fill(); stroke(c, 1.5); } });
+        else for (let i = 0; i < 3; i++) { const x = 380 + i * 90; c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.arc(x, 288, 6, 0, 3.14); c.stroke(); }
+      },
+      look: async () => say('mira', F('girlHang') ? 'Die Girlanden hängen an den Haken. Ob die Reihenfolge stimmt?' : 'Ein dicker Ast der Weide mit drei kleinen Haken. Hier hing wohl früher etwas.'),
+      use: async () => { if (!F('girlHang')) return say('mira', 'Drei leere Haken. Etwas zum Aufhängen wäre schön.'); if (F('nimWach')) return say('mira', 'Die Girlanden klingen leise im Wind.'); ui = 'garland'; },
+      items: { girlanden: async () => { if (F('girlHang')) return; take('girlanden'); setF('girlHang'); sfx('use'); await say('mira', 'Ich hänge die drei Girlanden an die Haken. Sie klingen leise. Ob die Reihenfolge stimmt? Klick den Ast noch einmal an, um sie umzuhängen.'); } }
+    });
+    list.push({
+      id: 'scheibe', name: 'Holzscheibe', r: [180, 420, 80, 58], walk: 220, face: 1,
+      draw(c) { ellip(c, 220, 462, 40, 14, '#a8703a', 3.5); ellip(c, 220, 456, 38, 12, '#d8a868', 3.5); [['#4ac05a', 32, 9], ['#f0d030', 20, 6], ['#9a4ad8', 8, 3]].forEach(([col, rx, ry]) => { c.beginPath(); c.ellipse(220, 456, rx, ry, 0, 0, 7); c.strokeStyle = col; c.lineWidth = 4; c.stroke(); }); },
+      look: async () => say('mira', 'Eine Baumscheibe mit Jahresringen – ungewöhnlich bunt: innen violett, in der Mitte gelb, außen grün.'),
+      use: async () => { note('Holzscheibe: Ringe von innen nach außen violett, gelb, grün. Die Girlanden gehören in dieser Reihenfolge von links nach rechts an den Ast.'); await say('mira', 'Innen violett, in der Mitte gelb, außen grün. Ich merke mir die Reihenfolge.'); }
+    });
+    list.push(edgeExit('l', 'garten', 'Zum Garten', 850, null));
+    list.push(edgeExit('r', 'furt', 'Zur Bachfurt', 110, () => F('nimWach'), 'Der Weg zum Bach führt an Nim vorbei – und sie schläft mitten im Weg. So einfach lasse ich sie nicht liegen.'));
+    return list;
+  },
+  async onEnter() { if (!F('introWeide')) { setF('introWeide'); await say('mira', 'Eine riesige Trauerweide. Und darunter schläft jemand tief und fest.'); } },
+  async onSeason(n) {
+    if (n === 'he' && F('girlHang') && !F('nimWach')) {
+      if (F('girlOk')) { await nimWake(); } else { await say('mira', 'Der Herbstwind fährt durch die Girlanden – es klingt schief und unschön. Die Reihenfolge stimmt noch nicht.'); }
+    }
+  }
+};
+function checkGirl() {
+  if (S.girl[0] === 'violett' && S.girl[1] === 'gelb' && S.girl[2] === 'gruen') { setF('girlOk'); sfx('success'); showToast('Die Girlanden klingen harmonisch!'); ui = null; note('Die Girlanden hängen in der richtigen Reihenfolge. Jetzt fehlt ein Westwind: die Weide auf Herbst stellen.'); }
+}
+async function nimWake() {
+  sfx('season'); await say('mira', 'Der Westwind streicht durch die Girlanden – violett, gelb, grün – und die Weide singt!');
+  setF('nimWach'); await say('nim', '… Mmh? Wer spielt da meine Melodie? Ich habe seit hundert Herbsten nicht mehr so gut geschlafen!');
+  await say('nim', 'Ich bin Nim, Baumhüterin. Du trägst Elias\' Herz? Er hat mir einst dieses Siegel anvertraut – das Frühlingssiegel.');
+  give('siegelFr'); setF('sFr'); S.unlocked.includes('wi') || S.unlocked.push('wi');
+  await say('nim', 'Nimm es. Und hier: einen Wegkristall aus meinen Wurzeln. Er bringt dich zu jedem Ort, den du schon kennst.');
+  give('kristall'); sfx('success'); await say('mira', 'Und der Winter ist jetzt auch frei! Das Herz wird stärker mit jedem Siegel.');
+  insight('Der Wald erinnert sich in jedem Baum ein wenig – verteilt ist er klüger als ein einzelner.'); note('Nim gab mir das Frühlingssiegel und einen Wegkristall (Schnellreise über die Karte).');
+}
+async function nimTalk() {
+  if (!F('nimWach')) return say('mira', 'Sie schläft tief. Ich rüttle sie sanft – nichts. Ich brauche eine Melodie, die sie weckt … die Girlanden vielleicht?');
+  await talkLoop([
+    { t: 'Wo finde ich die anderen Siegel?', show: () => true, fn: async () => say('nim', 'Elias hat sie verteilt: Eines liegt bei den Wintergeistern der Insel, eines im Hain der Erinnerungen, und das Sommersiegel trägt Corvin selbst.') },
+    { t: 'Wie komme ich über den Bach?', show: () => !F('platteGelegt'), fn: async () => say('nim', 'Im Frühling ist er ein reißender Fluss. Im Sommer sinkt das Wasser – dann kannst du dir mit einer Steinplatte einen Übergang bauen. Die Platte liegt am Ufer, sie ist nur schwer.') },
+    { t: 'Danke, Nim.', show: () => true, fn: async () => say('nim', 'Danke dir. Und lass den Wald nicht warten.') }
+  ]);
+}
+
+/* =====================================================================
+   BACHFURT
+   ===================================================================== */
+const RIVER = { fr: [330, 640], so: [430, 530], he: [400, 560], wi: [420, 540] };
+SC.furt = {
+  id: 'furt', title: 'Bachfurt', natural: 'fr', minX: 50, get maxX() { return curSeasonOf('furt') === 'so' && F('platteGelegt') ? 880 : 380; }, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 250, 71, P.mtn, se !== 'he'); groundBase(c, P, se);
+    const [a, b] = RIVER[se]; c.beginPath(); c.moveTo(a + 30, 372); c.lineTo(b - 30, 372); c.lineTo(b + 10, 540); c.lineTo(a - 10, 540); c.closePath();
+    c.fillStyle = se === 'wi' ? grad(c, 0, 372, 0, 540, ['#e8f4fc', '#c0dcf0']) : se === 'fr' ? grad(c, 0, 372, 0, 540, ['#8ac8e0', '#4a90c0']) : grad(c, 0, 372, 0, 540, ['#63c0ec', '#2f86c8']); c.fill(); stroke(c, 3.5);
+    c.strokeStyle = se === 'wi' ? 'rgba(90,140,190,.6)' : 'rgba(255,255,255,.7)'; c.lineWidth = 2.5; const r = R(7);
+    for (let i = 0; i < 18; i++) { const x = a + 20 + r() * (b - a - 40), y = 390 + r() * 130; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + 8, y - 4, x + 18, y + 6); c.stroke(); }
+    for (let i = 0; i < 8; i++) rockShape(c, a - 10 + (i % 2) * 6, 420 + i * 14, 20, 14, '#a8a2b0', 80 + i, se === 'wi');
+    birch(c, 200, 428, .9, se, 81); birch(c, 260, 434, .7, se, 82); tree(c, 860, 430, .7, se, 83);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    const [a, b] = RIVER[se];
+    if (!F('platteGelegt')) list.push({
+      id: 'platte', name: 'Steinplatte', r: [300, 430, 100, 50], walk: 290, face: 1,
+      draw(c) { poly(c, [[300, 476], [316, 440], [398, 436], [402, 476]], '#b8b4c0', 3.5); c.fillStyle = 'rgba(20,10,40,.2)'; c.fillRect(360, 440, 40, 36); },
+      look: async () => say('mira', 'Eine große, flache Steinplatte am Ufer. Zu schwer zum Tragen – aber mit einem Hebel …'),
+      use: async () => say('mira', 'Ich schiebe. Ich schwitze. Nichts. Die Platte wiegt bestimmt 200 Kilo.'),
+      items: { stange: async () => { if (se !== 'so') { sfx('fail'); return say('mira', se === 'fr' ? 'Der Bach ist im Frühling viel zu hoch – die Platte würde einfach untergehen.' : se === 'he' ? 'Im Herbst steht das Wasser noch zu hoch für die Platte. Im Sommer ist Niedrigwasser.' : 'Das Wasser ist zugefroren. Die Platte würde nur rutschen.'); } setF('platteGelegt'); sfx('success'); await say('mira', 'Ich stemme die Stange unter die Platte, ein kräftiger Ruck – und sie kippt genau in die Lücke zwischen den Ufersteinen! Ein Übergang. Aber nur bei Niedrigwasser im Sommer gangbar.'); } }
+    });
+    else if (se === 'so') list.push({ id: 'uebergang', name: 'Steinplatte', r: [420, 440, 120, 40], draw(c) { poly(c, [[a + 6, 488], [a + 18, 470], [b - 20, 468], [b - 6, 488]], '#b8b4c0', 3.5); rockShape(c, (a + b) / 2, 500, 40, 18, '#a8a2b0', 92, false); }, look: async () => say('mira', 'Die Platte überbrückt das Niedrigwasser. Solange der Sommer bleibt, komme ich hinüber.'), use: async () => say('mira', 'Fest wie ein Brückenpfeiler.') });
+    list.push({
+      id: 'bach', name: 'Bach', r: [a, 380, b - a, 100], walk: a - 40, face: 1, draw() { },
+      look: async () => say('mira', { fr: 'Schmelzwasser! Der Bach ist zu einem reißenden Fluss angeschwollen – kein Durchkommen.', so: 'Im Sommer liegt der Bach flach und ruhig. Die Steine am Grund sind zu sehen.', he: 'Mittleres Wasser, aber schon zu tief für trockene Füße.', wi: 'Das fließende Wasser ist an den Rändern zugefroren – aber in der Mitte bleibt es offen. Fließendes Wasser friert spät.' }[se]),
+      use: async () => say('mira', 'Ich tauche die Hand ein. Eiskalt. Und rutschig.')
+    });
+    list.push(edgeExit('l', 'weide', 'Zum Weidenhain', 850, null));
+    list.push(edgeExit('r', 'markt', 'Zum Händlerlager', 110, () => curSeason() === 'so' && F('platteGelegt'), 'Hinüber komme ich nur bei Niedrigwasser im Sommer und mit einer Steinplatte als Brücke.'));
+    return list;
+  },
+  async onEnter() { if (!F('introFurt')) { setF('introFurt'); await say('mira', 'Ein Bach mit Schmelzwasser, das reißend über die Steine springt. Da komme ich nicht einfach hinüber.'); } },
+  async onSeason() { if (S.x > 400 && !(curSeason() === 'so' && F('platteGelegt'))) { S.x = 370; S.target = null; await say('mira', 'Die Strömung schwemmt mich zurück ans Ufer! Ohne Niedrigwasser geht es nicht.'); } }
+};
+function curSeasonOf(id) { return seasonOf(id); }
+
+/* =====================================================================
+   HÄNDLERLAGER
+   ===================================================================== */
+SC.markt = {
+  id: 'markt', title: 'Fenns Händlerlager', natural: 'fr', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 245, 91, P.mtn, se !== 'he'); groundBase(c, P, se);
+    for (let i = 0; i < 9; i++) pine(c, 40 + i * 120, 400 + (i % 2) * 8, .55, se, 110 + i);
+    // Zelt
+    poly(c, [[90, 470], [110, 360], [200, 310], [290, 360], [310, 470]], '#e8c060', 3.8);
+    for (let i = 0; i < 3; i++) poly(c, [[110 + i * 66, 470], [110 + i * 66 + 6, 360], [200, 310], [110 + i * 66 + 30, 470]], i % 2 ? '#d84a3a' : 'rgba(0,0,0,0)', 0);
+    poly(c, [[170, 470], [176, 400], [230, 400], [236, 470]], '#3a1a20', 3.5);
+    // Wimpel
+    c.strokeStyle = INK; c.lineWidth = 3; c.beginPath(); c.moveTo(100, 300); c.quadraticCurveTo(480, 370, 860, 290); c.stroke();
+    for (let i = 0; i < 16; i++) { const x = 100 + i * 47.5, y = 300 + Math.sin(i / 15 * 3.14) * 46 - (i > 8 ? (i - 8) * 1.5 : 0) + 4; poly(c, [[x - 8, y], [x + 8, y], [x, y + 18]], ['#e8503a', '#f4d03a', '#3a8ae8', '#4ac05a'][i % 4], 2.5); }
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push(npc('fenn', 'Fenn', 380, -1, 340, 1, 'Fenn, der fahrende Händler. Sein Lächeln ist breit wie sein Warenlager – und wahrscheinlich genauso aufgeblasen.', () => fennTalk()));
+    list.push({
+      id: 'kochstelle', name: 'Kochstelle', r: [470, 420, 70, 56], walk: 500,
+      draw(c, t) { for (let i = 0; i < 6; i++) { const a = i / 6 * 6.28; blob(c, 505 + Math.cos(a) * 24, 468 + Math.sin(a) * 7, 8, 6, '#9a9aa4', 130 + i, 2.5); } flame(c, 505, 466, .9, t); line(c, [[480, 430], [505, 440], [530, 430]], INK, 3); blob(c, 505, 444, 22, 14, '#3a3a44', 6, 3.5); smoke(c, 505, 425, t); },
+      look: async () => say('mira', 'Fenns Kochstelle. Was auch immer im Topf blubbert – es riecht besser, als es aussieht.'), use: async () => say('mira', 'Ich rühre einmal um. Fenn ruft "Nicht anfassen, das ist Suppe des Tages – seit Montag!"')
+    });
+    list.push({
+      id: 'waren', name: 'Waren', r: [560, 420, 100, 56], walk: 600,
+      draw(c) { rrect(c, 566, 440, 44, 34, 3, '#a8703a', 3); rrect(c, 612, 448, 36, 26, 3, '#c08040', 3); blob(c, 588, 432, 12, 10, '#e03030', 3, 2, false); blob(c, 574, 434, 10, 9, '#f0c030', 4, 2, false); rrect(c, 620, 434, 24, 16, 3, '#5a86c0', 2.5); },
+      look: async () => say('mira', 'Kisten, Körbe, Krimskrams. Ein Schild sagt: "Alles nur echt – Fenn."'), use: async () => say('mira', 'Ich wühle kurz. Fenn räuspert sich vielsagend.')
+    });
+    list.push(archExit('huette', 'Kräuterlager', 700, 448, 110, null, null, 84));
+    list.push(archExit('ballonwiese', 'Ballonwiese', 810, 448, 110, null, null, 84));
+    list.push(edgeExit('l', 'furt', 'Zur Furt', 850, null));
+    list.push(edgeExit('r', 'see', 'Zum Seeufer', 110, null));
+    return list;
+  },
+  async onEnter() { if (!F('introMarkt')) { setF('introMarkt'); await say('mira', 'Ein Händlerlager, bunt und laut, wie ein Jahrmarkt in Miniatur. Überall Wimpel, Kisten und Körbe.'); } }
+};
+async function fennTalk() {
+  if (!F('fennMet')) { setF('fennMet'); await say('fenn', 'Willkommen, Willkommen! Fenn, fahrender Händler, Tauschmeister und Erfinder des "Fast-dichten" Eimers!'); await say('mira', 'Ich suche Elias. Kennst du ihn?'); await say('fenn', 'Elias? Der kauft bei mir Fläschchen und Kräuter. Sein Lager steht gleich hinter meinem Zelt – dort hinten, durch den Torbogen.'); }
+  await talkLoop([
+    { t: 'Hast du etwas zu tauschen?', show: () => !F('eimerHat'), fn: async () => {
+      if (!has('kuerbis')) { await say('fenn', 'Einen Holzeimer hätte ich! Gegen einen Herbstkürbis. Ich koche die beste Kürbissuppe im Tal – wenn ich nur Kürbisse hätte!'); note('Fenn tauscht einen Holzeimer gegen einen Kürbis (Herbst: Dorfplatz oder Erntefeld).'); }
+      else { take('kuerbis'); give('eimer'); setF('eimerHat'); await say('fenn', 'Ein Kürbis! Für dich: meinen Holzeimer. Fast dicht! … Hm, meistens.'); insight('Kein Ort ernährt einen das ganze Jahr – alle Orte mit ihren eigenen Zeiten zusammen schon.'); }
+    } },
+    { t: 'Wie braue ich einen Klarsicht-Trank?', show: () => F('orinInfo') && !has('trank') && !F('trankGetrunken'), fn: async () => { await say('fenn', 'Elias schreibt es im Kräuterlager auf einen Zettel – aber ich sage dir: Quellwasser, das nie gefriert, und Birkensaft aus dem Frühling. Und ein Feuer, aber erst ganz zuletzt!'); } },
+    { t: 'Wie komme ich zum Adlerhorst?', show: () => F('tagebuchZiel'), fn: async () => { await say('fenn', 'Der Adlerhorst? Nur mit dem Ballon! Auf der Ballonwiese liegt einer, aber der hat ein Loch, braucht Brennstoff und kalte Luft – kalte Luft trägt besser.'); } },
+    { t: 'Wie hilfst du mir sonst?', show: () => F('tagebuchZiel'), fn: async () => { await say('fenn', 'Dichte Hülle: Flicken drauf. Brennstoff: Stroh. Und die Luft draußen sollte möglichst kalt sein. Rechnen kann ich nicht – aber Physik meint es gut mit uns Ballonfahrern.'); } },
+    { t: 'Wo ist das Kräuterlager?', show: () => true, fn: async () => say('fenn', 'Torbogen links von der Ballonwiese, hinter meinen Kisten. Du kannst es nicht verfehlen. Es ist das mit den Kräutern.') }
+  ]);
+}
+
+/* =====================================================================
+   ELIAS' KRÄUTERLAGER
+   ===================================================================== */
+SC.huette = {
+  id: 'huette', title: 'Elias\' Kräuterlager', natural: 'he', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 250, 141, P.mtn, se !== 'he'); groundBase(c, P, se);
+    for (let i = 0; i < 9; i++) pine(c, 30 + i * 110, 396 + (i % 2) * 10, .8 + (i % 3) * .1, se, 150 + i);
+    house(c, 300, 452, 260, 140, se, { wall: '#c8a878', roof: '#4a6a3a', doorAt: .1, skew: 4 });
+    for (let i = 0; i < 6; i++) { const x = 310 + i * 40; line(c, [[x, 330], [x + 2, 352]], INK, 2); blob(c, x + 2, 362, 8, 12, ['#6ac04a', '#e0d050', '#c890ff', '#e87a3a'][i % 4], 160 + i, 2, false); }
+    rockShape(c, 120, 476, 110, 70, '#7a8a7a', 171, false); rockShape(c, 860, 480, 90, 60, '#7a8a7a', 172, false);
+    c.fillStyle = 'rgba(110,60,150,.09)'; c.fillRect(0, 0, W, H);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push({
+      id: 'rezept', name: 'Rezepttisch', r: [340, 405, 90, 70], walk: 380, face: 1,
+      draw(c) { rrect(c, 344, 436, 84, 12, 3, '#a8703a', 3.5); rrect(c, 352, 448, 8, 28, 2, '#8a5a30', 3); rrect(c, 412, 448, 8, 28, 2, '#8a5a30', 3); rrect(c, 358, 424, 40, 14, 2, '#f0e6c0', 2.5); blob(c, 412, 430, 8, 6, '#6ac04a', 3, 2, false); },
+      look: async () => { await say('mira', 'Ein Tisch mit einem Rezeptzettel in Elias\' Handschrift.'); await readDoc('Elias\' Rezept', ['Klarsicht-Trank – sieht durch jeden Nebel.', '', '1 Flasche Quellwasser – jenes, das auch im tiefsten Winter nie gefriert.', '1 Eimer Birkensaft – nur im Vorfrühling zu zapfen, wenn der Baum „blutet".', '', 'Alles in den Braukessel. Das Feuer erst ganz zuletzt entfachen, sonst kocht der Zauber über.', '', 'Danach abfüllen. Kühl und dunkel lagern. – E.']); note('Rezept Klarsicht-Trank: Quellwasser (bleibt im Winter offen), Birkensaft (nur Frühling), dann Feuer. In den Braukessel im Kräuterlager.'); },
+      use: async () => say('mira', 'Ich schaue mir den Zettel genauer an. Rechtsklick genügt – Elias schreibt so klein, dass man ihn lesen muss.')
+    });
+    list.push({
+      id: 'brief', name: 'Zettel', r: [440, 420, 44, 50], walk: 460,
+      draw(c) { rrect(c, 444, 448, 30, 24, 2, '#f0e6c0', 2.5); line(c, [[450, 456], [468, 456]], INK, 1.5); line(c, [[450, 462], [468, 462]], INK, 1.5); },
+      look: async () => { await readDoc('Zettel von Elias', ['Mira – falls du das liest:', '', 'Ich musste fort. Corvin darf den Tag nicht länger festhalten.', 'Die Siegel liegen verstreut: Nim hütet den Frühling, im Hain wartet der Herbst, auf einer Insel im Winter der Winter. Corvin selbst trägt den Sommer.', '', 'Ich bin in den Nebelwald. Ohne den Trank findest du den Weg nicht.', '', 'Vertrau dem Herz. – Elias']); note('Elias floh in den Nebelwald. Der Klarsicht-Trank ist nötig.'); },
+      use: async () => say('mira', 'Ich stecke ihn lieber nicht ein – ich habe seinen Inhalt schon im Kopf.')
+    });
+    list.push({
+      id: 'bord', name: 'Flaschenbord', r: [200, 380, 90, 90], walk: 240, face: 1,
+      draw(c) { rrect(c, 204, 400, 84, 8, 2, '#8a5a30', 3); rrect(c, 204, 440, 84, 8, 2, '#8a5a30', 3); for (let i = 0; i < 4; i++) { rrect(c, 212 + i * 20, 372 + (i % 2) * 2, 12, 28, 3, ['#7ac07a', '#c890ff', '#7ab8e0', '#f0c060'][i], 2.5); } if (!F('flascheWeg')) rrect(c, 216, 412, 14, 28, 3, 'rgba(200,240,255,.85)', 2.5); },
+      look: async () => say('mira', 'Ein Bord voller Fläschchen. Eine saubere, leere Glasflasche steht dabei.'),
+      use: async () => { if (F('flascheWeg')) return say('mira', 'Der Rest ist bunt gefüllt – keine leeren mehr.'); setF('flascheWeg'); give('flasche'); await say('mira', 'Eine saubere, leere Glasflasche. Die kann ich gut gebrauchen.'); }
+    });
+    list.push({
+      id: 'kiste2', name: 'Elias\' Kiste', r: [600, 420, 80, 56], walk: 650, face: -1,
+      draw(c) { rrect(c, 604, 440, 72, 36, 4, '#7a5a38', 3.5); rrect(c, 601, 428, 78, 16, 5, '#946a40', 3.5); rrect(c, 634, 434, 12, 10, 2, '#f4c542', 2.5); },
+      look: async () => say('mira', 'Eine Kiste mit Elias\' Zeichen.'),
+      use: async () => { if (F('zunderHat')) return say('mira', 'Leer bis auf Staub.'); setF('zunderHat'); give('zunder'); await say('mira', 'Feuerstein, Schlageisen und trockener Zunder. Genau das, was ich zum Anzünden brauche.'); }
+    });
+    list.push({
+      id: 'brau', name: 'Braukessel', r: [700, 380, 130, 100], walk: 690, face: 1,
+      draw(c, t) { for (let i = 0; i < 6; i++) { const a = i / 6 * 6.28; blob(c, 765 + Math.cos(a) * 30, 470 + Math.sin(a) * 7, 9, 7, '#9a9aa4', 180 + i, 2.5); } line(c, [[730, 380], [730, 440]], INK, 6); line(c, [[800, 380], [800, 440]], INK, 6); line(c, [[730, 380], [800, 380]], INK, 6); blob(c, 765, 430, 40, 30, '#3a4a5a', 8, 3.5); ellip(c, 765, 416, 34, 8, F('brewQ') && F('brewS') ? '#6ac07a' : F('brewQ') ? '#7ab8e0' : '#1a1a20', 2.5); if (F('brewFeuer')) { flame(c, 765, 470, 1.1, t); } if (F('brewFeuer')) smoke(c, 765, 400, t, 'rgba(120,220,140,.7)'); },
+      look: async () => say('mira', 'Ein Braukessel über einer Feuerstelle. ' + (F('brewQ') ? 'Quellwasser ist schon drin. ' : '') + (F('brewS') ? 'Birkensaft auch. ' : '') + (F('brewFeuer') ? 'Das Feuer brennt.' : 'Das Feuer ist kalt.')),
+      use: async () => say('mira', 'Zutaten und Feuer – in der richtigen Reihenfolge. Rezept lesen!'),
+      items: {
+        flascheQuelle: async () => { if (F('brewQ')) return; swap('flascheQuelle', 'flasche'); setF('brewQ'); sfx('use'); await say('mira', 'Ich gieße das lauwarme Quellwasser in den Kessel. Die Flasche behalte ich – sie wird noch gebraucht.'); },
+        flascheSee: async () => { sfx('fail'); await say('mira', 'Gewöhnliches Seewasser? Elias schreibt "Quellwasser, das nie gefriert". Das hier friert im Winter zu – falsch!'); },
+        eimerSaft: async () => { if (F('brewS')) return; swap('eimerSaft', 'eimer'); setF('brewS'); sfx('use'); await say('mira', 'Der klare Birkensaft rinnt in den Kessel.'); },
+        zunder: async () => { if (!F('brewQ') || !F('brewS')) { sfx('fail'); return say('mira', 'Zu früh! Erst müssen Quellwasser und Birkensaft im Kessel sein. Das Feuer kommt zuletzt.'); } if (F('brewFeuer')) return; setF('brewFeuer'); sfx('fire'); await say('mira', 'Funken vom Feuerstein – der Zunder fängt, und unter dem Kessel knistert es. Die Brühe färbt sich smaragdgrün und beginnt zu leuchten.'); },
+        flasche: async () => { if (!F('brewFeuer')) { sfx('fail'); return say('mira', 'Der Kessel ist noch nicht fertig. Ich brauche Wasser, Saft und Feuer.'); } take('flasche'); give('trank'); setF('brewDone'); sfx('success'); await say('mira', 'Ich fülle den leuchtenden Sud in die Flasche. Der Klarsicht-Trank! Damit sehe ich durch jeden Nebel.'); },
+        eimer: async () => say('mira', 'Der Eimer ist leer. Ich brauche Birkensaft.'), holz: async () => say('mira', 'Zum Befeuern reicht Zunder. Lagerholz brauche ich nicht.')
+      }
+    });
+    list.push(edgeExit('l', 'markt', 'Zum Händlerlager', 700, null));
+    return list;
+  },
+  async onEnter() { if (!F('introHuette')) { setF('introHuette'); await say('mira', 'Elias\' Kräuterlager! Kräuter hängen an Schnüren, Fläschchen klirren, und überall liegt sein Geruch nach Salbei und Pergament.'); } }
+};
+
+/* =====================================================================
+   SEEUFER
+   ===================================================================== */
+SC.see = {
+  id: 'see', title: 'Seeufer', natural: 'he', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    mountains(c, P, 240, 191, P.mtn, se !== 'he'); groundBase(c, P, se);
+    lakeShape(c, se, 330, 376, W + 10, 448); blob(c, 800, 366, 44, 12, se === 'wi' ? '#fff' : '#5a8a4a', 8, 2.5, false);
+    if (se !== 'wi') for (let i = 0; i < 6; i++) { line(c, [[350 + i * 14, 448], [352 + i * 14, 418]], '#7a9a3a', 3); }
+    rrect(c, 250, 440, 190, 10, 2, '#a06a38', 3.5); for (let i = 0; i < 4; i++) rrect(c, 260 + i * 46, 448, 8, 30, 2, '#6a4422', 3);
+    if (se === 'wi') poly(c, [[250, 440], [440, 440], [440, 436], [250, 436]], '#fff', 2);
+    tree(c, 900, 430, .7, se, 195);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push(npc('orin', 'Orin', 190, 1, 250, -1, 'Orin, der Sternkundige. Sein Bart reicht bis zum Gürtel und in seinen Augen glitzern kleine Sterne.', () => orinTalk()));
+    list.push({
+      id: 'boot', name: 'Boot', r: [270, 440, 100, 44], walk: 320,
+      draw(c) { poly(c, [[280, 464], [372, 464], [356, 484], [296, 484]], '#8a5a30', 3.5); line(c, [[300, 466], [310, 478]], INK, 2); rrect(c, 316, 452, 8, 14, 1, '#6a4422', 2); },
+      look: async () => say('mira', 'Orins Boot. Es ist ungefähr so dicht wie Fenns Eimer.'), use: async () => say('mira', 'Ich stelle einen Fuß hinein. Sofort Wasser. Nein danke.')
+    });
+    list.push({
+      id: 'birke', name: 'Birke', r: [500, 290, 90, 190], walk: 470, face: 1,
+      draw(c) { birch(c, 550, 476, 1.35, se, 200); if (F('birkeKerbe')) { poly(c, [[540, 420], [560, 424], [552, 430]], '#5a3a20', 1.5); if (se === 'fr') { c.fillStyle = 'rgba(180,230,255,.8)'; for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(548, 434 + i * 8, 2.2, 0, 7); c.fill(); } } } if (F('eimerStellt')) { rrect(c, 534, 446, 24, 22, 3, '#a8703a', 2.5); } },
+      look: async () => say('mira', 'Eine mächtige Birke. Im Vorfrühling „blutet" sie – ihr Saft steigt hoch.'),
+      use: async () => say('mira', 'Ich klopfe an den weißen Stamm. Hohl und trocken – nur im Frühling würde sich hier etwas tun.'),
+      items: {
+        axt: async () => { if (F('birkeKerbe')) return say('mira', 'Die Kerbe ist schon da.'); setF('birkeKerbe'); sfx('use'); await say('mira', 'Ich ritze die Rinde vorsichtig mit der Axtspitze an.'); if (se === 'fr') await say('mira', 'Klarer Saft tropft heraus – genau zur richtigen Jahreszeit!'); else await say('mira', 'Kein Tropfen. Der Baum gibt seinen Saft nur im Frühling her.'); },
+        eimer: async () => { if (!F('birkeKerbe')) return say('mira', 'Erst muss ich die Birke anritzen.'); if (se !== 'fr') { sfx('fail'); return say('mira', 'Ich halte den Eimer unter die Kerbe – kein Tropfen. Birken zapft man nur im Frühling.'); } setF('eimerStellt'); await sleep(500); swap('eimer', 'eimerSaft'); sfx('success'); await say('mira', 'Tropfen für Tropfen füllt sich der Eimer. Klarer, leicht süßer Birkensaft!'); setF('eimerStellt', false); }
+      }
+    });
+    list.push({
+      id: 'wasser', name: 'See', r: [420, 380, 400, 66], walk: 400, face: 1, draw() { },
+      look: async () => say('mira', { fr: 'Der See glitzert im Frühlingslicht. Das Wasser ist eiskalt.', so: 'Der See liegt ruhig und blau da.', he: 'Der Nebel liegt in Streifen über dem Wasser. Der See wirkt still und tief.', wi: 'Der See ist zugefroren. Das Eis ist dick – aber über einer warmen Quelle wäre es dünn.' }[se]),
+      use: async () => say('mira', 'Ich tunke einen Finger ins Wasser. Kalt. Ich glaube, ich bleibe an Land.'),
+      items: { flasche: async () => { if (se === 'wi') return say('mira', 'Das Eis ist zu dick. Ich müsste die dünne Stelle finden.'); swap('flasche', 'flascheSee'); sfx('use'); await say('mira', 'Ich fülle die Flasche mit gewöhnlichem Seewasser.'); } }
+    });
+    if (se === 'wi') list.push({
+      id: 'eis', name: F('aschespur') ? 'Aschestelle' : 'Eis', r: [560, 440, 200, 50], walk: 540, face: 1,
+      draw(c) { if (F('aschespur')) { c.fillStyle = 'rgba(60,60,70,.75)'; c.beginPath(); c.moveTo(560, 470); for (let x = 560; x <= 860; x += 20) c.lineTo(x, 466 + Math.sin(x / 30) * 3); c.lineTo(860, 476); c.lineTo(560, 476); c.fill(); ellip(c, 850, 462, 20, 6, '#3a6a98', 2.5); } },
+      look: async () => say('mira', F('aschespur') ? 'Die Asche ist ins Eis eingeschmolzen. Der Streifen führt zu einer dünnen Stelle mit warmer Quelle darunter. Ein Pfad zur Insel!' : 'Dickes Eis. Wo es dünn ist, wüsste ich gern – über einer warmen Quelle schmilzt dunkle Asche schneller ein.'),
+      use: async () => say('mira', F('aschespur') ? 'Ich prüfe das Eis mit dem Fuß. Der Aschestreifen trägt.' : 'Ich prüfe das Eis mit dem Fuß. Es knackt. Ich sollte die dünne Stelle finden, bevor ich weitergehe.'),
+      items: {
+        kesselAsche: async () => { if (F('aschespur')) return; swap('kesselAsche', 'kessel'); setF('aschespur'); sfx('use'); await say('mira', 'Ich streue die kalte Asche aufs Eis. Nach einer Weile schmilzt sie an einer Stelle ein – Wärme von unten! Dort ist das Eis dünn. Dort liegt die Quelle – und der sichere Weg zur Insel.'); note('Die Asche schmilzt über der warmen Quelle ein: Die dünne Stelle am See ist markiert.'); },
+        flasche: async () => { if (!F('aschespur')) return say('mira', 'Ohne die dünne Stelle komme ich nicht ans Wasser.'); swap('flasche', 'flascheQuelle'); sfx('use'); await say('mira', 'Ich schöpfe an der Aschestelle: Lauwarmes Quellwasser! Es gefriert nicht einmal im tiefsten Winter.'); }
+      }
+    });
+    const nebel = archExit('wald', 'Nebelpfad', 640, 448, 110, () => F('trankGetrunken'), 'Nebel wabert zwischen den Birken – ich sehe keine zwei Schritte weit. Ohne Hilfe finde ich hier nie hinein.', 84);
+    nebel.items = { trank: async () => { if (F('trankGetrunken')) return; take('trank'); setF('trankGetrunken'); sfx('success'); await say('mira', 'Ich trinke den Trank in einem Zug. Er schmeckt nach Minze und Regen. Der Nebel klart auf: Ich sehe einen Pfad zwischen den Stämmen!'); } };
+    list.push(nebel);
+    list.push(edgeExit('l', 'markt', 'Zum Händlerlager', 850, null));
+    list.push(edgeExit('r', 'insel', 'Über das Eis zur Insel', 110, () => curSeason() === 'wi' && F('aschespur'), 'Die Insel liegt weit draußen. Im Sommer ist da nur Wasser, und im Winter ist das Eis tückisch. Ich müsste die dünne Stelle kennen.'));
+    return list;
+  },
+  async onEnter() { if (!F('introSee')) { setF('introSee'); await say('mira', 'Ein stiller See mit Nebel über dem Wasser. Weit draußen sehe ich eine kleine Insel.'); } }
+};
+async function orinTalk() {
+  if (!F('orinMet')) { setF('orinMet'); await say('orin', 'Ah – die Sterne haben dich angekündigt! Ich bin Orin. Du suchst Elias.'); await say('mira', 'Woher weißt du …?'); await say('orin', 'Er ist hier vorbeigekommen. Er floh in den Nebelwald, der bei den Birken beginnt. Ohne Klarsicht-Trank findest du den Weg nicht.'); setF('orinInfo'); note('Orin: Elias ist in den Nebelwald geflohen. Der Klarsicht-Trank ist nötig (Rezept im Kräuterlager).'); }
+  await talkLoop([
+    { t: 'Wie komme ich zur Insel?', show: () => !F('sWi'), fn: async () => { await say('orin', 'Im Winter friert der See zu. Doch unter dem Eis sprudelt eine warme Quelle, und dort ist es dünn. Streue dunkle Asche aufs Eis – über der Quelle schmilzt sie ein und zeigt dir den Weg.'); await say('orin', 'Auf der Insel steht ein Engel aus Stein. Sein Schatten zeigt im Winter, wo der Schatz liegt. Aber graben kannst du dort nur, wenn der Boden nicht gefroren ist – also in einer anderen Jahreszeit.'); note('Orin: Insel im Winter über das Eis (Aschespur). Der Winterschatten des Engels verrät, wo zu graben ist – gegraben wird in einer wärmeren Jahreszeit.'); } },
+    { t: 'Ich habe das Wintersiegel gefunden!', show: () => F('sWi') && !F('orinSiegel'), fn: async () => { setF('orinSiegel'); await say('orin', 'Wunderbar! Die Sterne hatten recht. Jedes Sternbild hat seine Zeit – keines regiert allein, und doch ist es ein Himmel.'); insight('Jedes Sternbild hat seine Zeit – keines regiert allein, und doch ist es ein Himmel.'); } },
+    { t: 'Was siehst du in den Sternen?', show: () => true, fn: async () => say('orin', 'Dass du zu viel fragst und zu wenig schläfst. Und dass der Nordstern nie weit wandert.') },
+    { t: 'Ich brauche den Klarsicht-Trank. Wie geht das?', show: () => !has('trank') && !F('trankGetrunken'), fn: async () => say('orin', 'Zutaten: Quellwasser – findest du unter dem Eis im Winter –, Birkensaft aus der Birke hier im Frühling, und Zunder. Fenn hat einen Eimer, wenn du ihm einen Kürbis bringst.') }
+  ]);
+}
+
+/* =====================================================================
+   INSEL DES ENGELS
+   ===================================================================== */
+const SUN_ELEV = { fr: 40, so: 63.5, he: 40, wi: 16.5 };
+const ANGEL_H = 110, ANGEL_X = 150;
+const shadowLen = se => ANGEL_H / Math.tan(SUN_ELEV[se] * Math.PI / 180);
+SC.insel = {
+  id: 'insel', title: 'Insel des Engels', natural: 'he', minX: 50, maxX: 880, startX: 120,
+  land(c, P, se) {
+    drawSkyStatic(c, se); mountains(c, P, 250, 201, P.mtn, se !== 'he');
+    c.fillStyle = grad(c, 0, 400, 0, H, se === 'wi' ? ['#e6f4fc', '#bfdcf0'] : ['#63c0ec', '#2f86c8']); c.fillRect(0, 400, W, H - 400); c.beginPath(); c.moveTo(0, 400); c.lineTo(W, 400); c.strokeStyle = INK; c.lineWidth = 3.5; c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 2.5; const r = R(3); for (let i = 0; i < 22; i++) { const x = r() * W, y = 410 + r() * 120; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + 10, y - 4, x + 24, y); c.stroke(); }
+    poly(c, [[0, 500], [40, 440], [200, 420], [700, 420], [860, 440], [W, 500], [W, H], [0, H]], se === 'wi' ? '#eef4fa' : P.ground, 3.5);
+    c.beginPath(); c.moveTo(0, 500); c.lineTo(W, 500); c.strokeStyle = 'rgba(0,0,0,.0)'; c.stroke();
+    c.fillStyle = 'rgba(20,10,40,.14)'; c.fillRect(0, 490, W, 50);
+    const rr = R(9); c.strokeStyle = dark(se === 'wi' ? '#d0e0f0' : P.ground2, .3); c.lineWidth = 2.5; for (let i = 0; i < 40; i++) { const x = rr() * W, y = 450 + rr() * 80; c.beginPath(); c.moveTo(x, y); c.lineTo(x - 3, y - 8); c.moveTo(x, y); c.lineTo(x + 3, y - 9); c.stroke(); }
+  },
+  objs() {
+    const se = curSeason(), list = [], L = shadowLen(se), ex = ANGEL_X + L;
+    list.push({
+      id: 'engel', name: 'Steinerner Engel', r: [ANGEL_X - 60, 340, 120, 140], walk: ANGEL_X + 70, face: -1,
+      draw(c) { c.fillStyle = 'rgba(20,10,40,.34)'; c.beginPath(); c.moveTo(ANGEL_X - 20, 474); c.lineTo(ANGEL_X + 20, 474); c.lineTo(ex + 12, 470); c.lineTo(ex - 12, 470); c.closePath(); c.fill(); angelStatue(c, ANGEL_X, 476, 1.15); },
+      look: async () => { if (se === 'wi') { setF('schattenGesehen'); note('Im Winter (Sonne nur 16,5° hoch) ist der Mittagsschatten des Engels am längsten: Er endet am großen Felsen rechts.'); await say('mira', 'Der Winterschatten ist lang – sehr lang. Seine Spitze endet genau am großen Felsen rechts, weit hinten. Länge = Höhe geteilt durch Tangens der Sonnenhöhe: Bei nur 16,5° ist der Schatten fast dreimal so lang wie der Engel hoch.'); } else await say('mira', 'Ein steinerner Engel. Sein Schatten ist ' + (se === 'so' ? 'im Hochsommer ganz kurz – die Sonne steht fast senkrecht' : 'mittellang – die Sonne steht nur mäßig hoch') + '. Die Spitze liegt nicht bei einem der großen Felsen.'); },
+      use: async () => say('mira', 'Ich streiche über den kalten Stein. Der Engel schweigt.')
+    });
+    [[ANGEL_X + shadowLen('so'), 'kleiner Felsen', 40, 26, 210], [ANGEL_X + shadowLen('he'), 'Felsen', 56, 40, 211], [ANGEL_X + shadowLen('wi'), 'großer Felsen', 110, 86, 212]].forEach(([x, nm, w, h, sd], i) => {
+      list.push({
+        id: 'fels' + i, name: nm, r: [x - w / 2, 474 - h, w, h + 6], walk: x - w / 2 - 20, face: 1,
+        draw(c) { rockShape(c, x, 476, w, h, '#a8a2b0', sd, se === 'wi'); },
+        look: async () => say('mira', i === 2 ? 'Ein mächtiger Felsen am Ende der Insel. Er steht genau dort, wo im Winter der Schatten des Engels endet.' : 'Ein Felsen, so wie es viele gibt. Nichts Besonderes.'),
+        use: async () => say('mira', 'Ich klopfe an den Stein. Er ist fest.'),
+        items: { axt: async () => {
+          if (i !== 2) { sfx('fail'); return say('mira', 'Ich grabe ein bisschen am Fuß des Felsens. Nichts. Nur Sand und Steine.'); }
+          if (se === 'wi') { sfx('fail'); return say('mira', 'Der Boden ist steinhart gefroren – die Axt prallt ab. Ich müsste in einer wärmeren Jahreszeit graben.'); }
+          if (!F('schattenGesehen')) { sfx('fail'); return say('mira', 'Warum ausgerechnet hier graben? Ich brauche einen Hinweis, wo das Siegel liegt.'); }
+          if (F('sWi')) return; give('siegelWi'); setF('sWi'); sfx('success'); await say('mira', 'Ich grabe am Fuß des großen Felsens – und die Axt klirrt auf Metall! Ein Kästchen mit dem Wintersiegel!'); note('Wintersiegel gefunden. Orin freut sich sicher.');
+        } }
+      });
+    });
+    list.push(edgeExit('l', 'see', 'Zurück zum Seeufer', 850, null));
+    return list;
+  },
+  async onEnter() { if (!F('introInsel')) { setF('introInsel'); await say('mira', 'Die Insel! Mitten im Eis. Ein steinerner Engel und drei Felsen. Sein Schatten zeigt bestimmt etwas.'); } }
+};
+
+/* =====================================================================
+   WALD DER WIEDERHOLTEN WEGE
+   ===================================================================== */
+const WALD_OK = [1, 2, 0];
+SC.wald = {
+  id: 'wald', title: 'Wald der wiederholten Wege', natural: 'he', switchable: false, minX: 50, maxX: 880, startX: 110, noTravel: true,
+  land(c, P, se) {
+    c.fillStyle = grad(c, 0, 0, 0, H, ['#3a5a4a', '#7a9a8a']); c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 14; i++) { c.fillStyle = 'rgba(255,255,255,.06)'; c.beginPath(); c.ellipse(60 + i * 70, 200 + (i % 3) * 60, 90, 30, 0, 0, 7); c.fill(); }
+    for (let i = 0; i < 12; i++) pine(c, 30 + i * 85, 350 + (i % 3) * 14, .9 + (i % 4) * .12, 'he', 220 + i);
+    c.fillStyle = grad(c, 0, 400, 0, H, ['#3f5a3a', '#2a3a2a']); c.fillRect(0, 405, W, H - 405);
+    c.fillStyle = 'rgba(200,220,200,.22)'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#5a4a38'; c.beginPath(); c.moveTo(0, 452); c.quadraticCurveTo(W / 2, 440, W, 452); c.lineTo(W, 505); c.quadraticCurveTo(W / 2, 512, 0, 505); c.fill(); c.strokeStyle = INK; c.lineWidth = 2.5; c.stroke();
+  },
+  objs() {
+    const list = [], stage = S.flags.waldStage || 0;
+    const xs = [200, 480, 760];
+    xs.forEach((x, i) => {
+      list.push({
+        id: 'pfad' + i, name: 'Pfad ' + ['links', 'in der Mitte', 'rechts'][i], r: [x - 70, 260, 140, 220], walk: x, face: 1,
+        draw(c, t) {
+          poly(c, [[x - 50, 470], [x - 26, 380], [x + 26, 380], [x + 50, 470]], '#4a3a2a', 2.5);
+          c.fillStyle = 'rgba(10,20,10,.55)'; c.beginPath(); c.moveTo(x - 40, 470); c.lineTo(x - 20, 380); c.lineTo(x + 20, 380); c.lineTo(x + 40, 470); c.fill();
+          if (stage === 0) { // Wolken
+            c.save(); c.translate(x, 290); if (i === 1) { poly(c, [[-60, 30], [-40, 10], [-20, -20], [0, -50], [22, -18], [44, 8], [64, 30]], '#f4f6fa', 3.5); blob(c, 0, 30, 60, 14, '#f4f6fa', 3, 3, false); poly(c, [[-4, -40], [0, -50], [6, -38], [0, -32]], '#fff', 0); c.fillStyle = 'rgba(90,120,170,.25)'; c.beginPath(); c.moveTo(0, -50); c.lineTo(22, -18); c.lineTo(44, 8); c.lineTo(64, 30); c.lineTo(0, 30); c.fill(); }
+            else if (i === 0) { cloud(c, -50, 20, 1.1, 'he'); } else { blob(c, 0, 10, 56, 24, '#f4f6fa', 33, 3.5); blob(c, 30, 0, 26, 20, '#f4f6fa', 34, 3.5); poly(c, [[-56, 8], [-72, -6], [-68, 24]], '#f4f6fa', 3); c.fillStyle = INK; c.beginPath(); c.arc(30, 4, 2.2, 0, 7); c.fill(); }
+            c.restore();
+          } else if (stage === 1) { // Vogelschwarm
+            const n = [3, 5, 12][i === 2 ? 2 : i === 0 ? 0 : 1] && ([5, 3, 12][i]); const cnt = [5, 3, 12][i];
+            const rr = R(300 + i); for (let k = 0; k < cnt; k++) { const bx = x - 40 + rr() * 80, by = 250 + rr() * 60 + Math.sin(t * 3 + k) * 3; line(c, [[bx - 8, by + 3], [bx, by], [bx + 8, by + 3]], INK, 3); }
+          } else if (stage === 2) { // Bäume
+            const tk = [1, 2, 0][i]; const sx = x, sy = 400; if (i === 1) { line(c, [[sx, sy], [sx, sy - 80]], INK, 8); thick(c, [[sx, sy - 40], [sx - 30, sy - 70]], '#6a4a34', 5); thick(c, [[sx, sy - 50], [sx + 30, sy - 84]], '#6a4a34', 5); } else if (i === 0) { pine(c, sx, 420, .9, 'wi', 320); } else { pine(c, sx, 420, .9, 'so', 321); }
+          }
+        },
+        look: async () => say('mira', stage === 0 ? 'Über dem Pfad hängt eine Wolke. ' + ['Sie sieht aus wie ein Fisch.', 'Sie ragt spitz auf, hoch wie ein Berg.', 'Sie sieht aus wie ein schlafender Vogel.'][i] : stage === 1 ? 'Ein Vogelschwarm kreist über dem Pfad – ' + ['fünf', 'nur drei', 'ein riesiger Schwarm'][i] + ' Vögel.' : 'Am Pfadrand steht ' + ['ein Baum im weißen Kleid – verschneit, obwohl es Herbst ist', 'ein kahler, toter Baum', 'ein grünender Sommerbaum'][i] + '.'),
+        use: async () => {
+          if (F('waldOk')) return say('mira', 'Der Nebel ist gelichtet – der Weg nach rechts steht offen.');
+          if (i === WALD_OK[stage]) {
+            S.flags.waldStage = stage + 1; sfx('success');
+            if (stage === 2) { setF('waldOk'); await say('mira', 'Und dann steht sie da: eine kleine Lichtung. Der Nebel lichtet sich. Der Weg ist geschafft – nach rechts geht es weiter!'); note('Wald geschafft: Wolke wie ein Berg, größter Vogelschwarm, Baum im weißen Kleid.'); }
+            else await say('mira', ['Ich folge dem Pfad unter der Wolke, die wie ein Berg aussieht. Der Nebel wird lichter – die nächste Weggabelung!', 'Ich folge dem größten Vogelschwarm. Noch eine Weggabelung – und wieder Nebel.'][stage]);
+          } else { S.flags.waldStage = 0; S.x = 110; S.target = null; sfx('fail'); await say('mira', 'Der Nebel dreht sich wie ein Wirbel – und plötzlich stehe ich wieder am Waldrand. Falscher Weg! Wo hat Lio den Reim wieder gehört …?'); }
+        }
+      });
+    });
+    list.push({ id: 'etappe', name: '', r: [0, 0, 0, 0], draw(c) { txt(c, F('waldOk') ? 'Der Nebel ist gelichtet' : 'Etappe ' + (stage + 1) + ' von 3', W / 2, 60, 22, '#fff', 'center'); }, show: () => true, use: async () => { } });
+    list.push(edgeExit('l', 'see', 'Zurück zum See', 600, null));
+    list.push(edgeExit('r', 'hain', 'Zum Gedächtnishain', 110, () => F('waldOk'), 'Zwischen den Nebelschwaden verzweigt sich der Weg dreifach. Ich muss den richtigen finden.'));
+    return list;
+  },
+  async onEnter() { if (!F('introWald')) { setF('introWald'); await say('mira', 'Dichter Nebel – und ich kann dank des Tranks trotzdem sehen. Drei Pfade, und ich weiß nicht, welcher der richtige ist.'); await say('mira', 'Lio kannte einen Reim für den Nebelwald. Ich sollte sie fragen – aber falsch abgebogen wird man einfach zum Anfang geführt.'); } }
+};
+
+/* =====================================================================
+   GEDÄCHTNISHAIN
+   ===================================================================== */
+const HAIN_IMG = ['garbe', 'keim', 'sack', 'weizen'], HAIN_ORDER = ['keim', 'weizen', 'garbe', 'sack'];
+function memoryImg(c, kind, x, y, glowA) {
+  c.save(); ellip(c, x, y, 32, 32, `rgba(255,240,180,${.75 * glowA})`, 0); ellip(c, x, y, 32, 32, null, 3);
+  if (kind === 'keim') { line(c, [[x, y + 18], [x, y]], '#3a8a3a', 4); blob(c, x - 8, y - 2, 8, 5, '#6ac06a', 1, 2, false); blob(c, x + 8, y - 6, 8, 5, '#6ac06a', 2, 2, false); }
+  if (kind === 'weizen') { for (let i = -1; i <= 1; i++) { line(c, [[x + i * 10, y + 20], [x + i * 10, y - 6]], '#b89a30', 3); blob(c, x + i * 10, y - 12, 4, 10, '#e8c23a', i + 5, 2, false); } }
+  if (kind === 'garbe') { poly(c, [[x - 12, y + 18], [x - 6, y - 10], [x + 6, y - 10], [x + 12, y + 18]], '#e8c23a', 2.5); line(c, [[x - 10, y + 6], [x + 10, y + 6]], '#8a5a30', 4); }
+  if (kind === 'sack') { blob(c, x, y + 4, 16, 18, '#d8c090', 6, 3, false); line(c, [[x - 6, y - 12], [x + 6, y - 12]], '#8a5a30', 4); }
+  c.restore();
+}
+SC.hain = {
+  id: 'hain', title: 'Gedächtnishain', natural: 'wi', minX: 50, maxX: 880, startX: 110,
+  land(c, P, se) {
+    mountains(c, P, 245, 231, P.mtn, se !== 'he'); groundBase(c, P, se);
+    for (let i = 0; i < 12; i++) tree(c, 30 + i * 85, 400 + (i % 2) * 14, .55, se, 235 + i);
+    for (let i = 0; i < 5; i++) { c.fillStyle = 'rgba(255,255,200,.10)'; c.beginPath(); c.moveTo(150 + i * 170, 0); c.lineTo(190 + i * 170, 0); c.lineTo(120 + i * 170, 420); c.lineTo(60 + i * 170, 420); c.fill(); }
+    for (let i = 0; i < 7; i++) { const x = 60 + i * 130; line(c, [[x, 470], [x - 8, 452]], '#3a8a4a', 3); line(c, [[x, 470], [x + 8, 452]], '#3a8a4a', 3); }
+  },
+  objs() {
+    const se = curSeason(), list = [], seq = S.hain || (S.hain = []);
+    HAIN_IMG.forEach((k, i) => {
+      const x = 260 + i * 170;
+      list.push({
+        id: 'stumpf' + i, name: 'Baumstumpf', r: [x - 44, 380, 88, 96], walk: x, face: 1,
+        draw(c, t) {
+          poly(c, [[x - 36, 474], [x - 30, 430], [x + 30, 430], [x + 36, 474]], '#8a5a30', 3.5); ellip(c, x, 430, 32, 10, '#d9a868', 3.5);
+          if (se === 'he') memoryImg(c, k, x, 378 + Math.sin(t * 2 + i) * 4, .5 + .5 * Math.sin(t * 2 + i) * .3 + (seq.includes(k) ? .4 : 0));
+          if (seq.includes(k)) { c.fillStyle = 'rgba(255,240,150,.45)'; c.beginPath(); c.ellipse(x, 430, 40, 12, 0, 0, 7); c.fill(); }
+        },
+        look: async () => say('mira', se === 'he' ? 'Über dem Stumpf schwebt ein Erinnerungsbild: ' + { garbe: 'eine Garbe', keim: 'ein zarter Keimling', sack: 'ein Sack Mehl', weizen: 'ein reifer Weizenhalm' }[k] + '.' : 'Ein alter Baumstumpf. Er ist still. Die Erinnerungen erwachen nur im Herbst.'),
+        use: async () => {
+          if (F('hainGeordnet')) return say('mira', 'Die Erinnerungen sind geordnet. Der hohle Stamm hat sich geöffnet.');
+          if (se !== 'he') return say('mira', 'Der Stumpf schweigt. Die Erinnerungen erwachen nur im Herbst – ich muss den Hain auf Herbst stellen.');
+          if (seq.includes(k)) return say('mira', 'Diese Erinnerung habe ich schon geordnet.');
+          if (k === HAIN_ORDER[seq.length]) { seq.push(k); sfx('pick'); if (seq.length === 4) { setF('hainGeordnet'); sfx('success'); await say('mira', 'Keimling, reifer Weizen, Garbe, Sack – die Erinnerung ist vollständig: ein Kreislauf! Der hohle Stamm öffnet sich knarrend.'); } else await say('mira', 'Das Bild leuchtet golden auf und bleibt.'); }
+          else { S.hain = []; sfx('fail'); await say('mira', 'Die Bilder verblassen – falsche Reihenfolge! Wie wächst das Getreide auf dem Feld? Vom Keimling bis zum Sack.'); }
+        }
+      });
+    });
+    list.push({
+      id: 'stamm', name: 'Hohler Stamm', r: [100, 330, 100, 150], walk: 180, face: -1,
+      draw(c) { poly(c, [[110, 474], [116, 340], [130, 300], [176, 300], [190, 340], [196, 474]], '#6a4426', 3.5); ellip(c, 153, 400, 26, 40, F('hainGeordnet') ? '#ffe28a' : '#1a0e08', 3); if (F('hainGeordnet') && !F('sHe')) { blob(c, 153, 410, 14, 14, '#e77b26', 3, 2.5, false); c.font = '16px ' + FONT; c.textAlign = 'center'; c.fillStyle = '#fff'; c.fillText('🍂', 153, 416); } },
+      look: async () => say('mira', F('hainGeordnet') ? 'Der Stamm ist geöffnet – dahinter leuchtet etwas.' : 'Ein hohler Stamm, innen dunkel. Er scheint auf etwas zu warten.'),
+      use: async () => { if (!F('hainGeordnet')) return say('mira', 'Nur Dunkelheit. Der Stamm öffnet sich, wenn ich die Erinnerungen ordne.'); if (F('sHe')) return say('mira', 'Nur noch Blätter.'); give('siegelHe'); setF('sHe'); sfx('success'); await say('mira', 'Im Stamm liegt das Herbstsiegel – warm und raschelnd. Elias hat es hier zurückgelassen.'); note('Herbstsiegel gefunden. Der Weg zum Schlosstor ist frei.'); }
+    });
+    list.push(edgeExit('l', 'wald', 'Zurück in den Wald', 850, null));
+    list.push(edgeExit('r', 'tor', 'Zum Schlosstor', 110, () => F('sHe'), 'Der Weg zum Schloss ist von Nebel versperrt. Ich brauche erst das Herbstsiegel.'));
+    return list;
+  },
+  async onEnter() { if (!F('introHain')) { setF('introHain'); await say('mira', 'Eine stille Lichtung mit vier Baumstümpfen im Kreis und einem hohlen Stamm. Was für ein Ort. Irgendetwas ist hier verborgen.'); note('Hain: Im Herbst zeigen die Stümpfe Erinnerungsbilder. Die richtige Reihenfolge: Wie wächst das Getreide auf dem Feld?'); } }
+};
+
+/* =====================================================================
+   SCHLOSSTOR
+   ===================================================================== */
+SC.tor = {
+  id: 'tor', title: 'Schlosstor', natural: 'he', minX: 50, maxX: 880, startX: 110,
+  land(c, P, se) {
+    mountains(c, P, 240, 251, P.mtn, se !== 'he'); groundBase(c, P, se);
+    poly(c, [[420, 470], [420, 250], [960, 250], [960, 470]], '#a09ab0', 3.5);
+    for (let r = 0; r < 5; r++) for (let i = 0; i < 12; i++) rrect(c, 420 + i * 46 + (r % 2) * 20, 250 + r * 44, 46, 44, 3, r % 2 ? '#b0aac0' : '#a8a2b8', 2);
+    for (let i = 0; i < 8; i++) rrect(c, 420 + i * 70, 232, 34, 22, 2, '#a09ab0', 3);
+    poly(c, [[620, 470], [620, 330], [660, 290], [700, 330], [700, 470]], '#4a3a5a', 3.5);
+    poly(c, [[64, 470], [64, 300], [100, 260], [136, 300], [136, 470]], 'rgba(0,0,0,0)', 0);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push(npc('brann', 'Brann', 500, -1, 470, 1, 'Brann, der Torwächter. Ein Schwert an der Hüfte, Sorgenfalten auf der Stirn – kein böser Mensch, nur ein einsamer.', () => brannTalk(), { items: { zweig: async () => {
+      if (F('torOffen')) return; take('zweig'); setF('torOffen'); sfx('success');
+      await say('brann', 'Ein Apfelblütenzweig … Ich habe seit Jahren keinen mehr gesehen. Er duftet wie Avelines Garten im Frühling.');
+      await say('brann', 'Das Tor ist offen. Geh zum Fürsten. Ein Wächter, der nur einem Herrn dient, bewacht am Ende eine leere Halle – ich hätte früher etwas sagen sollen.');
+      insight('Ein Wächter, der nur einem Herrn dient, bewacht am Ende eine leere Halle.'); note('Das Schlosstor ist offen. Corvin wartet auf dem Schlossberg.');
+    } } }));
+    list.push({
+      id: 'gitter', name: 'Gittertor', r: [610, 320, 100, 150], walk: 570, face: 1,
+      draw(c, t) { const open = F('torOffen'); for (let i = 0; i < 6; i++) { const x = 628 + i * 12; line(c, [[x, 470 - (open ? 110 : 0)], [x, 330 - (open ? 110 : 0)]], '#4a4a5a', 4); } line(c, [[622, 380 - (open ? 110 : 0)], [700, 380 - (open ? 110 : 0)]], '#4a4a5a', 4); [[560, 340], [760, 340]].forEach(([x, y]) => { rrect(c, x, y, 8, 50, 2, '#6a4422', 3); flame(c, x + 4, y - 2, .5, t); }); },
+      look: async () => say('mira', F('torOffen') ? 'Das Gittertor ist offen. Dahinter führt der Weg zum Schlossberg.' : 'Ein schweres Gittertor, mit Fackeln zu beiden Seiten. Brann steht davor.'),
+      use: async () => F('torOffen') ? gotoScene('schloss', 110) : say('mira', 'Das Gitter ist fest verschlossen. Brann schaut mich an.')
+    });
+    list.push({
+      id: 'graeber', name: 'Gräber', r: [120, 400, 200, 76], walk: 250, face: -1,
+      draw(c) { graveStone(c, 150, 470, 1.1); graveStone(c, 220, 476, 1.2); c.fillStyle = 'rgba(0,0,0,.2)'; c.fillRect(120, 470, 140, 4); bush(c, 285, 476, .5, se, 240); },
+      look: async () => { await say('mira', 'Zwei Gräber am Tor. Die Inschriften: "Avelines Eltern – im Wechsel der Zeiten geborgen".'); await say('mira', 'Aveline … Corvins Frau. Ihre Eltern sind hier begraben, nicht sie selbst.'); },
+      use: async () => say('mira', 'Ich stehe einen Moment still. Manche Orte verlangen das.')
+    });
+    list.push({
+      id: 'statue', name: 'Statue', r: [330, 350, 70, 126], walk: 350, face: 1,
+      draw(c) { angelStatue(c, 370, 476, 1.05); },
+      look: async () => say('mira', 'Eine Statue – eine junge Frau mit sanftem Lächeln. Aveline, laut der Inschrift. Sie sieht aus, als würde sie gerade in eine andere Jahreszeit blicken.'),
+      use: async () => say('mira', 'Ich lege die Hand auf den Sockel. Er ist glatt vom Regen vieler Jahre.')
+    });
+    list.push(edgeExit('l', 'hain', 'Zum Hain', 850, null));
+    return list;
+  },
+  async onEnter() { if (!F('introTor')) { setF('introTor'); await say('mira', 'Das Schlosstor! Mauern mit Fackeln, ein Gittertor – und auf dem Weg dahin ein kleiner Friedhof.'); } }
+};
+async function brannTalk() {
+  if (!F('brannMet')) { setF('brannMet'); await say('brann', 'Halt. Das Tor ist zu. Fürst Corvin empfängt niemanden.'); await say('mira', 'Ich bin Mira. Ich möchte nur mit ihm reden.'); await say('brann', 'Viele wollten das. Keiner kam zurück, wie er ging.'); }
+  await talkLoop([
+    { t: 'Wer liegt in diesen Gräbern?', show: () => true, fn: async () => { await say('brann', 'Avelines Eltern. Ich war Avelines Leibwächter. Sie liebte den Frühling, und ich bringe ihren Eltern immer einen Zweig Apfelblüten. Aber ich darf mein Tor nicht verlassen – und im Herbst blüht kein Apfelbaum.'); setF('brannZweig'); note('Brann sehnt sich nach einem blühenden Apfelblütenzweig (Dorfplatz im Frühling, mit der Axt).'); } },
+    { t: 'Lass mich bitte durch.', show: () => !F('torOffen'), fn: async () => { await say('brann', 'Nur, wenn du mir etwas bringst, das ich seit Jahren nicht sah: einen blühenden Apfelblütenzweig.'); note('Brann öffnet das Tor gegen einen Apfelblütenzweig.'); } },
+    { t: 'Ich bin schon durch?', show: () => F('torOffen'), fn: async () => say('brann', 'Geh. Und bring ihn zur Vernunft. Bitte.') }
+  ]);
+}
+
+/* =====================================================================
+   SCHLOSSBERG
+   ===================================================================== */
+SC.schloss = {
+  id: 'schloss', title: 'Schlossberg', natural: 'so', switchable: false, minX: 50, maxX: 880, startX: 110,
+  land(c, P, se) {
+    const Pp = PAL.so;
+    c.fillStyle = grad(c, 0, 0, 0, 400, ['#f8d060', '#ffe9a0', '#fff6cc']); c.fillRect(0, 0, W, H);
+    glow(c, 480, 160, 380, 'rgba(255,240,150,A)', .7);
+    hills(c, 350, 26, '#e8c23a', 5); castle(c, 480, 380, 1.5, '#e8d8c8', '#9a4a30');
+    hills(c, 400, 18, '#d8b02a', 8);
+    c.fillStyle = grad(c, 0, 405, 0, H, ['#c8a02a', '#a8842a']); c.fillRect(0, 410, W, H - 410);
+    c.beginPath(); c.moveTo(0, 410); for (let x = 0; x <= W; x += 24) c.lineTo(x, 410 + Math.sin(x / 60) * 4); c.strokeStyle = INK; c.lineWidth = 3.5; c.stroke();
+    c.fillStyle = '#e6c88a'; c.beginPath(); c.moveTo(0, 452); c.quadraticCurveTo(W / 2, 440, W, 452); c.lineTo(W, 505); c.quadraticCurveTo(W / 2, 512, 0, 505); c.fill(); c.strokeStyle = INK; c.lineWidth = 2.5; c.stroke();
+    const r = R(6); c.strokeStyle = '#8a6a1a'; c.lineWidth = 3; for (let i = 0; i < 220; i++) { const x = r() * W, y = 418 + r() * 34; c.beginPath(); c.moveTo(x, y); c.lineTo(x + 2, y - 26); c.stroke(); }
+  },
+  objs() {
+    const list = [];
+    list.push(npc('corvin', 'Fürst Corvin', 330, 1, 380, -1, 'Fürst Corvin. Sein Gewand ist edel, sein Blick müde. Er sieht aus wie jemand, der seit Ewigkeiten nicht mehr geschlafen hat.', () => corvinTalk()));
+    list.push({
+      id: 'grab', name: 'Avelines Grab', r: [120, 380, 140, 96], walk: 200, face: -1,
+      draw(c) { rrect(c, 130, 444, 120, 30, 6, '#a8d0a0', 3); graveStone(c, 190, 452, 1.5); for (let i = 0; i < 6; i++) { blob(c, 140 + i * 20, 470 + (i % 2) * 3, 5, 5, ['#ffb6d1', '#ffd84a', '#e77b26', '#c8e0ff'][i % 4], i, 2, false); } },
+      look: async () => { await say('mira', 'Avelines Grab. Blumen aus allen vier Jahreszeiten liegen darauf – und jede sieht frisch aus.'); await readDoc('Avelines Grab', ['„Aveline, geliebte Gefährtin. Sie liebte den Wechsel der Zeiten."', '', 'Und darunter, mit anderer Hand: „Halte mich nicht fest. Lass mich in jedem Jahr wiederkehren."']); insight('Sie lebte im Wechsel der Zeiten – nicht in einem festgehaltenen Tag.'); },
+      use: async () => say('mira', 'Ich verneige mich kurz. Sie hat es verdient.')
+    });
+    list.push({
+      id: 'schale', name: 'Siegelschale', r: [510, 380, 100, 96], walk: 500, face: 1,
+      draw(c, t) { poly(c, [[540, 474], [548, 420], [572, 420], [580, 474]], '#a8a2b8', 3.5); poly(c, [[520, 424], [530, 404], [590, 404], [600, 424], [572, 434], [548, 434]], '#c8c2d8', 3.5); const on = ['sFr', 'sSo', 'sWi', 'sHe']; const pos = [[560, 412], [582, 404], [560, 396], [538, 404]]; const cols = ['#ffb6d1', '#ffd84a', '#a9d8ff', '#e77b26']; if (F('schaleOk')) glow(c, 560, 400, 120, 'rgba(255,240,150,A)', .7); },
+      look: async () => say('mira', 'Eine Schale mit vier Mulden, jede mit dem Zeichen einer Jahreszeit. Hier gehören die vier Siegel hin.'),
+      use: async () => {
+        if (F('schaleOk')) return say('mira', 'Die Siegel ruhen in der Schale.');
+        if (!(F('sFr') && F('sSo') && F('sHe') && F('sWi'))) return say('mira', 'Ich brauche alle vier Siegel: ' + [F('sFr') ? '' : 'Frühling', F('sSo') ? '' : 'Sommer', F('sHe') ? '' : 'Herbst', F('sWi') ? '' : 'Winter'].filter(Boolean).join(', ') + ' fehlt noch.');
+        await say('mira', 'Vier Mulden: oben, rechts, unten, links. Elias schrieb: nach dem Lauf der Sonne.'); ui = 'ring'; ringKind = 'schale'; await new Promise(res => { ringDone = res; }); if (F('schaleOk')) await schaleSequence();
+      }
+    });
+    list.push({
+      id: 'riss', name: 'Riss zwischen den Zeiten', r: [640, 270, 200, 210], walk: 620, face: 1,
+      draw(c, t) {
+        const ok = F('eliasFrei'); c.save(); c.translate(730, 370);
+        if (!ok) { for (let i = 0; i < 10; i++) { const a = i / 10 * 6.28 + t * .6; c.strokeStyle = ['#8a4ad8', '#4ab8e8', '#e87ad8'][i % 3]; c.lineWidth = 4; c.beginPath(); c.ellipse(0, 0, 40 + i * 6, 90 + i * 8, a * .2, 0, 3.6 + Math.sin(t + i)); c.stroke(); } ellip(c, 0, 0, 34, 78, 'rgba(20,10,40,.9)', 3); c.restore(); if (!F('eliasFrei')) drawChar(c, 730, 440, CHAR.elias, { dir: -1, t, sc: .8 }); } else c.restore();
+      },
+      look: async () => say('mira', F('eliasFrei') ? 'Der Riss hat sich geschlossen.' : 'Ein Riss mitten in der Luft, hinter dem sich die Jahreszeiten drängen. Und darin: Elias! Er sieht mich, aber ich höre ihn kaum.'),
+      use: async () => say('mira', F('eliasFrei') ? 'Nichts mehr da.' : 'Ich strecke die Hand aus – sie prallt an einer unsichtbaren Wand ab. Ich brauche die Siegelschale!')
+    });
+    if (F('eliasFrei')) list.push(npc('elias', 'Elias', 730, -1, 690, 1, 'Elias, endlich frei. Sein Bart ist ein bisschen weißer geworden.', () => eliasTalk()));
+    list.push(edgeExit('l', 'tor', 'Zum Schlosstor', 800, null));
+    return list;
+  },
+  async onEnter() { if (!F('introSchloss')) { setF('introSchloss'); await say('mira', 'Ein ewiger Sommertag! Alles glüht golden, die Ähren stehen reif. Wie ein Gemälde, das nie trocknet.'); await say('mira', 'Das ist also das Herz der ganzen Sache: der Schlossberg. Und dort – Fürst Corvin.'); } },
+  async onSeason() { }
+};
+async function corvinTalk() {
+  if (!F('corvinMet')) { setF('corvinMet'); await say('corvin', 'Du bist weit gekommen. Sehr weit. Wer bist du?'); await say('mira', 'Mira, Elias\' Schülerin. Ich habe die Siegel gesammelt. Fürst, dieser Sommer muss enden.'); await say('corvin', 'Nein. An diesem Tag hat Aveline gelacht. Wenn der Tag vergeht, vergeht sie mit ihm.'); }
+  await talkLoop([
+    { t: 'Hör mich an, Corvin.', show: () => !F('corvinZweifel'), fn: async () => { await say('mira', 'Draußen im Tal reifen die Ähren nicht. Der Weizen fault am Halm, die Kinder frieren mitten im Herbst. Avelines Grab liegt hier – aber sie liegt nicht in diesem Tag.'); await say('corvin', '… Du sprichst wahr. Doch Worte sind nicht sie. Wenn du mir Avelines eigene Worte bringst – ihre Stimme –, dann würde ich zuhören.'); setF('corvinZweifel'); setF('tagebuchZiel'); note('Corvin will Avelines eigene Worte hören. Ihr Tagebuch liegt irgendwo im Adlerhorst (nur mit dem Ballon erreichbar).'); } },
+    { t: 'Hör, was Aveline in ihr Tagebuch geschrieben hat.', show: () => has('tagebuch') && !F('sSo'), fn: async () => {
+      await say('mira', '„Mein Liebster, du fragst, warum ich die Jahreszeiten liebe. Weil nichts in der Welt stillsteht, und weil ich das Wiederkommen mehr liebe als das Bleiben. Halte nichts fest – ich werde in jedem Jahr sein, das du weiterlebst."');
+      await say('corvin', '… Sie hat es gewusst. Sie hat gewusst, dass ich sie festhalten würde – und ich habe es trotzdem getan.'); await say('corvin', 'Hier. Das Sommersiegel. Nimm es. Lass die Zeit wieder fließen.');
+      give('siegelSo'); setF('sSo'); sfx('success'); note('Corvin gab mir das Sommersiegel. Alle vier Siegel gehören in die Siegelschale.');
+    } },
+    { t: 'Warum dieser Tag?', show: () => true, fn: async () => say('corvin', 'Es war der letzte Sommertag, an dem sie mit mir tanzte. Danach kam der Herbst, dann ihr Fieber. Ich wollte nur einen Tag länger.') }
+  ]);
+}
+async function schaleSequence() {
+  sfx('season'); flash = 1; await sleep(600); setF('eliasFrei'); landKey = '';
+  await say('mira', 'Die Siegel leuchten – Frühling, Sommer, Herbst, Winter. Der Riss knistert, flackert – und öffnet sich!');
+  await say('elias', 'Mira! Ich wusste, dass du den Weg findest. Nur du konntest es.');
+  await say('mira', 'Elias! Du lebst. Du hast alles hinterlassen und bist verschwunden …');
+  await say('elias', 'Ich musste. Die Siegel durften nicht in Corvins Hände fallen. Aber jetzt liegen sie in der Schale – und die Frage ist, was mit ihnen geschehen soll.');
+  await say('elias', 'Die Entscheidung ist deine, Mira. Du hast das Herz getragen.');
+  await chooseEnding();
+}
+async function eliasTalk() { await chooseEnding(); }
+async function chooseEnding() {
+  for (;;) {
+    const n = S.insights.length, cOk = n >= INSIGHT_NEED;
+    const i = await choice(['A – Wiederherstellung: Das Schloss hütet alle vier Siegel, der alte Jahreslauf kehrt zurück.', 'B – Freier Wandel: Die Bindung zerbrechen. Die Jahreszeiten folgen nur noch der Natur.', cOk ? 'C – Behutsame Neuordnung: Die Siegel werden auf die Hüter des Tals verteilt.' : 'C – (verschlossen: Ich habe erst ' + n + ' von 12 Einsichten, ich brauche mindestens ' + INSIGHT_NEED + ')', 'Ich muss noch nachdenken.']);
+    if (i === 3) return;
+    if (i === 2 && !cOk) { await say('elias', 'Dazu fehlt dir noch Verständnis für das Tal. Sprich mit seinen Hütern – Runa, Tovin, Selma, Nim, Orin, Hedda, Fenn, Brann, Ansgar. Oder lies noch einmal, was Aveline schrieb.'); continue; }
+    await say('elias', ['Wiederherstellung – das Schloss hütet wieder alle Siegel. Ist das dein letztes Wort?', 'Freier Wandel – ohne Bindung, für immer unberechenbar. Sicher?', 'Behutsame Neuordnung – jedes Siegel in die Hände derer, die ihre Zeit kennen. Bist du sicher?'][i]);
+    const j = await choice(['Ja, so soll es sein.', 'Nein, noch einmal überlegen.']); if (j === 0) { await startEnding(['A', 'B', 'C'][i]); return; }
+  }
+}
+const INSIGHT_TOTAL = 12, INSIGHT_NEED = 6;
+
+/* =====================================================================
+   BALLONWIESE
+   ===================================================================== */
+const AUFTRIEB = { fr: [10, 331], so: [28, 249], he: [10, 331], wi: [-8, 424] };
+SC.ballonwiese = {
+  id: 'ballonwiese', title: 'Ballonwiese', natural: 'so', minX: 50, maxX: 880, startX: 110,
+  land(c, P, se) { mountains(c, P, 270, 261, P.mtn, se !== 'he'); groundBase(c, P, se); hills(c, 390, 20, P.hill1, 15); c.fillStyle = grad(c, 0, 410, 0, H, [P.ground, P.ground2]); c.fillRect(0, 415, W, H - 415); c.beginPath(); c.moveTo(0, 415); for (let x = 0; x <= W; x += 24) c.lineTo(x, 415 + Math.sin(x / 50) * 3); c.strokeStyle = INK; c.lineWidth = 3; c.stroke(); rrect(c, 700, 380, 12, 100, 3, '#8a5a30', 3.5); },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push({
+      id: 'huelle', name: 'Ballonhülle', r: [400, 130, 200, 250], walk: 430, face: 1,
+      draw(c, t) { balloonEnv(c, 500, 240, 1.1, F('flickenAuf'), t); line(c, [[430, 340], [462, 420]], INK, 3); line(c, [[570, 340], [538, 420]], INK, 3); line(c, [[500, 355], [500, 420]], INK, 3); },
+      look: async () => say('mira', F('flickenAuf') ? 'Der Flicken hält: Die Hülle ist wieder dicht.' : 'Die Hülle hat ein riesiges Loch, mitten in der Seite. So kommt der Ballon nie hoch. Ein großer Flicken müsste her.'),
+      use: async () => say('mira', 'Ich streiche über den Stoff. Er ist erstaunlich fest.'),
+      items: { flicken: async () => { if (F('flickenAuf')) return; take('flicken'); setF('flickenAuf'); sfx('success'); await say('mira', 'Ich lege den Flicken aufs Loch und presse ihn fest. Er hält!'); }, tuch: async () => say('mira', 'Ein einfaches Tuch klebt nicht. Es muss mit Nadel und Garn ringsum vernäht werden – ein Flicken.') }
+    });
+    list.push({
+      id: 'feuerkorb', name: 'Feuerkorb', r: [458, 410, 80, 56], walk: 400, face: 1,
+      draw(c, t) { poly(c, [[470, 470], [478, 430], [522, 430], [530, 470]], '#5a5a66', 3.5); ellip(c, 500, 430, 24, 6, '#2a2a30', 3); if (F('strohIm')) { for (let i = 0; i < 4; i++) line(c, [[484 + i * 10, 430], [490 + i * 8, 418]], '#e8c23a', 3); } },
+      look: async () => say('mira', F('strohIm') ? 'Trockenes Stroh im Feuerkorb. Es brennt schnell und heiß – bereit zum Entzünden.' : 'Ein leerer Feuerkorb. Hier fehlt Brennstoff.'),
+      use: async () => say('mira', 'Ohne Brennstoff bleibt er kalt.'),
+      items: { stroh: async () => { if (F('strohIm')) return; take('stroh'); setF('strohIm'); sfx('use'); await say('mira', 'Ich stopfe die Strohgarben in den Feuerkorb. Mit einem Funken geht das in Flammen auf.'); }, holz: async () => say('mira', 'Holz brennt zu langsam. Stroh brennt schnell und heiß – der Brennstoff der ersten Ballonfahrer.') }
+    });
+    list.push({
+      id: 'korb', name: 'Ballonkorb', r: [456, 440, 90, 50], walk: 500, face: 1,
+      draw(c) { rrect(c, 458, 460, 84, 30, 6, '#b88a52', 3.5); c.strokeStyle = 'rgba(80,40,10,.5)'; c.lineWidth = 2; for (let i = 1; i < 5; i++) { c.beginPath(); c.moveTo(458 + i * 17, 462); c.lineTo(458 + i * 17, 488); c.stroke(); } },
+      look: async () => say('mira', 'Ein Weidenkorb. Genug Platz für eine Person und ein bisschen Ballast.'),
+      use: async () => balloonLaunch()
+    });
+    list.push(edgeExit('l', 'markt', 'Zum Händlerlager', 810, null));
+    return list;
+  },
+  async onEnter() { if (!F('introBallon')) { setF('introBallon'); await say('mira', 'Eine weite Wiese und darauf: ein alter Ballon. Er sieht aus, als hätte er schon bessere Tage gesehen – und ein Loch in der Seite.'); } }
+};
+async function balloonLaunch() {
+  if (!F('flickenAuf')) return say('mira', 'Die Hülle hat ein riesiges Loch. Die Warmluft würde einfach entweichen.');
+  if (!F('strohIm')) return say('mira', 'Ohne Brennstoff im Feuerkorb bringe ich keine heiße Luft zustande.');
+  const se = curSeason(), [T, lift] = AUFTRIEB[se];
+  if (lift < 335) { sfx('fail'); await say('mira', 'Ich zünde das Stroh an – der Ballon füllt sich, ruckelt, hebt ein Stück … und sinkt zurück. Bei ' + T + ' °C Außentemperatur trägt die Hülle nur etwa ' + lift + ' kg. Die Last beträgt aber 335 kg.'); await say('mira', 'Auftrieb = Volumen × (Dichte der kalten Luft – Dichte der heißen Luft). Je kälter draußen, desto dichter die Luft – desto mehr trägt sie. Es müsste kälter sein!'); note('Ballon: Auftrieb bei 28 °C nur 249 kg, bei 10 °C 331 kg – beides zu wenig für 335 kg Last. Bei −8 °C (Winter) 424 kg – das reicht.'); return; }
+  sfx('fire'); await say('mira', 'Bei ' + T + ' °C Außentemperatur trägt die Hülle etwa ' + lift + ' kg – das reicht für meine 335 kg Last! Ich zünde das Stroh …');
+  await fadeTo(1); sfx('season'); S.scene = 'adlerhorst'; S.x = 200; S.visited.adlerhorst = true; landKey = ''; await fadeTo(0);
+  setF('flugGemacht'); await say('mira', 'Der Ballon steigt über die Wolken! Unter mir liegt das ganze Tal – die Jahreszeiten liegen wie bunte Flicken nebeneinander.'); await SC.adlerhorst.onEnter();
+}
+
+/* =====================================================================
+   ADLERHORST
+   ===================================================================== */
+SC.adlerhorst = {
+  id: 'adlerhorst', title: 'Adlerhorst', natural: 'so', minX: 50, maxX: 880, startX: 200, noTravel: true,
+  land(c, P, se) {
+    c.fillStyle = grad(c, 0, 0, 0, H, se === 'wi' ? ['#7ab0e8', '#e0f0ff'] : ['#2b8ae0', '#b8e4ff']); c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 7; i++) cloud(c, 40 + i * 150, 330 + (i % 3) * 30, 1.3, se);
+    poly(c, [[0, 500], [0, 440], [180, 420], [700, 420], [W, 450], [W, 500]], se === 'wi' ? '#eef4fa' : '#9a9aa4', 3.5);
+    c.fillStyle = grad(c, 0, 430, 0, H, se === 'wi' ? ['#f0f6fc', '#d0e0f0'] : ['#8ab868', '#6a9a50']); c.fillRect(0, 440, W, H - 440);
+    c.beginPath(); c.moveTo(0, 440); c.lineTo(W, 440); c.strokeStyle = INK; c.lineWidth = 3.5; c.stroke();
+    // Pavillon
+    for (let i = 0; i < 4; i++) rrect(c, 90 + i * 66, 300, 14, 170, 3, '#e8e2f0', 3.5); poly(c, [[70, 305], [200, 240], [300, 305]], '#c05a70', 3.5);
+    poly(c, [[74, 470], [300, 470], [300, 480], [74, 480]], '#a8a2b8', 3);
+  },
+  objs() {
+    const se = curSeason(), list = [];
+    list.push({
+      id: 'buste', name: 'Büste', r: [180, 380, 60, 90], walk: 200, face: 1,
+      draw(c) { rrect(c, 190, 440, 40, 34, 3, '#d0ccdc', 3.5); blob(c, 210, 420, 14, 16, '#e8e4f0', 3, 3, false); ellip(c, 240, 466, 10, 8, '#c8a878', 2.5); ellip(c, 100, 466, 10, 8, '#c8a878', 2.5); },
+      look: async () => say('mira', 'Eine Marmorbüste einer jungen Frau: Aveline. Neben ihr stehen zwei Urnen – mit Erde aus allen vier Jahreszeiten.'), use: async () => say('mira', 'Ich verweile einen Moment. Man spürt, dass Aveline diesen Ort geliebt hat.')
+    });
+    list.push({
+      id: 'nest', name: 'Storchennest', r: [560, 300, 160, 180], walk: 540, face: 1,
+      draw(c, t) {
+        poly(c, [[620, 474], [626, 400], [676, 400], [682, 474]], '#8a5a30', 3.5); ellip(c, 651, 400, 50, 12, '#8a6a3a', 3.5); for (let i = 0; i < 8; i++) line(c, [[610 + i * 10, 400], [606 + i * 12, 384 + (i % 2) * 6]], '#8a6a3a', 3);
+        if (se === 'wi') { blob(c, 651, 392, 48, 12, '#fff', 4, 2.5, false); poly(c, [[620, 474], [626, 400], [636, 410], [634, 474]], 'rgba(200,230,255,.8)', 0); }
+        if (se === 'fr' || se === 'so') for (let i = 0; i < 2; i++) { const bx = 636 + i * 30; c.save(); c.translate(bx, 388); c.scale(i ? -1 : 1, 1); line(c, [[0, 0], [0, -30]], '#e8a020', 3); blob(c, 0, -46, 16, 12, '#fff', 12, 3, false); poly(c, [[10, -46], [36, -42], [10, -40]], '#e83a3a', 2); ellip(c, -8, -20, 10, 20, '#fff', 3); c.restore(); }
+      },
+      look: async () => say('mira', { fr: 'Im Nest brüten zwei Weißstörche. Sie klappern drohend, sobald ich näherkomme.', so: 'Zwei Störche füttern ihre Jungen und verteidigen das Nest laut klappernd.', he: 'Das Nest ist leer – die Störche sind schon nach Süden gezogen. Etwas Rostiges glänzt darin.', wi: 'Der Baumstumpf ist vereist – glatt wie Glas. Da klettere ich nicht hoch.' }[se]),
+      use: async () => {
+        if (se === 'fr' || se === 'so') { sfx('fail'); return say('mira', 'Ich komme nur einen Schritt näher – und schon fährt ein Storchenschnabel auf mich zu. Weißstörche ziehen erst im Spätsommer nach Süden. Ich sollte warten.'); }
+        if (se === 'wi') { sfx('fail'); return say('mira', 'Ich rutsche am vereisten Stumpf ab und lande unsanft im Schnee. Auf so glattem Eis komme ich nicht hinauf.'); }
+        if (F('doseHat')) return say('mira', 'Nur noch Zweige und Federn.'); setF('doseHat'); give('dose'); await say('mira', 'Im Herbst sind die Störche fort. Ich klettere den Stumpf hinauf – und finde im Nest eine verrostete Blechdose.');
+      }
+    });
+    list.push({
+      id: 'ballon', name: 'Ballon', r: [780, 150, 180, 330], walk: 780, face: 1,
+      draw(c, t) { balloonEnv(c, 860, 290, .6, true, t); rrect(c, 830, 440, 56, 22, 5, '#b88a52', 3); },
+      look: async () => say('mira', 'Mein Ballon. Er sitzt sicher am Boden, mit dem Anker am Fels.'),
+      use: async () => { await say('mira', 'Zurück ins Tal!'); await fadeTo(1); S.scene = 'ballonwiese'; S.x = 520; landKey = ''; await fadeTo(0); }
+    });
+    list.push({
+      id: 'urnen', name: 'Urnen', r: [90, 430, 40, 46], walk: 130, face: 1, draw() { }, look: async () => say('mira', 'Zwei Urnen: eine mit Frühlingserde, eine mit Winterschnee.'), use: async () => say('mira', 'Ich rühre sie lieber nicht an.')
+    });
+    return list;
+  },
+  async onEnter() { if (!F('introHorst')) { setF('introHorst'); await say('mira', 'Der Adlerhorst! Über den Wolken – ein kleiner Pavillon, ein Storchennest auf einem alten Stumpf und wunderbare Aussicht.'); await say('mira', 'Irgendwo hier muss Avelines Tagebuch sein. Elias schrieb, die Störche hüten es …'); } }
+};
+addCombo('dose', 'stange', async () => {
+  if (!has('dose') || !has('stange')) return; take('dose'); give('tagebuch'); sfx('success');
+  await say('mira', 'Ich setze die Brechstange am festgerosteten Deckel an – und mit einem Knacken springt er auf! Darin: ein Bündel in rotem Leder – Avelines Tagebuch!');
+  await readTagebuch();
+});
+addCombo('tuch', 'nadel', async () => {
+  take('tuch'); give('flicken', true); sfx('success');
+  await say('mira', 'Ich säume das Leinentuch ringsum mit festem Garn – Stich für Stich. Ein stabiler Flicken, groß genug für ein ganzes Loch in einer Ballonhülle!');
+});
+async function readTagebuch() {
+  await readDoc('Avelines Tagebuch', ['„Mein Liebster fragt, warum ich Jahreszeiten so liebe. Weil nichts in der Welt stillsteht, und weil ich das Wiederkommen mehr liebe als das Bleiben.', '', 'Der Frühling schenkt mir Mut, der Sommer Leichtigkeit, der Herbst Dankbarkeit und der Winter Ruhe. Nimm mir keine davon.', '', 'Halte nichts fest – ich werde in jedem Jahr sein, das du weiterlebst."']);
+  insight('Halte nichts fest – ich werde in jedem Jahr sein, das du weiterlebst.'); setF('tagebuchGelesen'); note('Avelines Tagebuch gefunden. Corvin soll ihre Worte hören.');
+}
+Object.assign(ITEMS.tagebuch, { direct: true });
+
+/* =====================================================================
+   Ergänzungen an bestehenden Szenen
+   ===================================================================== */
+// Feld: Stroh und Kürbis im Herbst
+{
+  const base = SC.feld.objs;
+  SC.feld.objs = function () {
+    const list = base.call(this), se = curSeason();
+    if (se === 'he') {
+      if (!F('strohWeg')) list.push({ id: 'stroh', name: 'Strohgarben', r: [380, 400, 100, 76], walk: 420, draw(c) { for (let i = 0; i < 3; i++) { poly(c, [[392 + i * 30, 474], [396 + i * 30, 420], [410 + i * 30, 420], [416 + i * 30, 474]], '#e8c23a', 3); line(c, [[392 + i * 30, 448], [416 + i * 30, 448]], '#8a5a30', 4); } }, look: async () => say('mira', 'Trockene Strohgarben. Brennt schnell und heiß – der Brennstoff der ersten Ballonfahrer.'), use: async () => { setF('strohWeg'); give('stroh'); await say('mira', 'Ich nehme ein paar Garben mit. Vielleicht hilft das einem Ballon in die Luft.'); } });
+      if (!F('kuerbisWeg')) list.push({ id: 'kuerbisFeld', name: 'Kürbis', r: [700, 430, 60, 40], walk: 730, draw(c) { blob(c, 730, 462, 22, 16, '#f08a20', 22, 3.5); rrect(c, 727, 440, 6, 9, 2, '#5a8a30', 2.5); }, look: async () => say('mira', 'Ein praller Herbstkürbis am Feldrand.'), use: async () => { setF('kuerbisWeg'); give('kuerbis'); await say('mira', 'Ein Kürbis! Der wird später sicher noch nützlich.'); } });
+    }
+    return list;
+  };
+}
+
+/* =====================================================================
+   TEIL 3 – Lesen, Ringe, Karte, Intro, Enden
+   ===================================================================== */
+let ringDone = null, readDone = null, ringKind = 'herz', readCfg = null, gSel = -1;
+
+function readDoc(title, paras) {
+  if (AUTO) return Promise.resolve();
+  readCfg = { title, paras }; ui = 'read';
+  return new Promise(res => { readDone = res; });
+}
+function readNotes() {
+  return readDoc('Elias\' Notizen', ['„… der Ring des Herzens folgt dem Lauf der Sonne: Oben beginnt das Jahr – der Frühling. Rechts, im Osten, wo die Sonne aufgeht, der Sommer. Unten ruht der Winter. Links, im Westen, wo sie sinkt, der Herbst.',
+    '', 'Rezept für die Kraft des Herzens: Schnee vom Winter, Blüten vom Frühling – gemischt in einer Phiole und sanft erwärmt, nicht gekocht. Dann ins Herz gießen.', '', 'Achte auf die Schwelle zwischen den Zeiten: Wer den Ring dreht, verändert den Ort, nie die Welt. Jeder Wechsel ist umkehrbar.', '', 'Sollte mir etwas zustoßen: Sucht die vier Siegel. Corvin darf den Tag nicht festhalten …"']);
+}
+function drawRead(c) {
+  const cfg = readCfg || { title: '', paras: [] };
+  c.fillStyle = 'rgba(10,6,20,.75)'; c.fillRect(0, 0, W, H); panel(c, 150, 30, 660, 480, '#efe0b4');
+  txt(c, cfg.title, W / 2, 84, 30, '#5a3a20', 'center', true, false);
+  let y = 126; cfg.paras.forEach(l => { wrap(c, l, 580, 19).forEach(s => { txt(c, s, 190, y, 19, '#3a2410', 'left', false, false); y += 25; }); if (!l) y += 6; });
+  button(c, W / 2 - 60, 456, 120, 40, 'Schließen', () => { ui = null; const r = readDone; readDone = null; r && r(); });
+}
+
+/* ----- Ring (Herz und Siegelschale) ----- */
+function glowSeal(c, cx, cy, t) { for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(cx, cy); c.arc(cx, cy, 70, i * 1.5708 - 1.5708, i * 1.5708); c.fillStyle = ['#ffb6d1', '#ffd84a', '#a9d8ff', '#e77b26'][i]; c.globalAlpha = .55 + .15 * Math.sin(t * 2 + i); c.fill(); c.globalAlpha = 1; } }
+function drawRing(c, t) {
+  const herz = ringKind === 'herz', arr = herz ? S.ring : S.ring2;
+  c.fillStyle = 'rgba(10,6,20,.82)'; c.fillRect(0, 0, W, H); panel(c, 200, 40, 560, 460);
+  txt(c, herz ? 'Das Jahreszeitenherz' : 'Die Siegelschale', W / 2, 92, 30, '#7b3fb8', 'center', true, false);
+  txt(c, herz ? 'Klicke die Felder, um die Jahreszeiten zu wählen.' : 'Lege die vier Siegel in die Mulden – nach dem Lauf der Sonne.', W / 2, 122, 17, '#5a4030', 'center', false, false);
+  const cx = W / 2, cy = 285, R0 = 110; ellip(c, cx, cy, R0 + 30, R0 + 30, '#c9a86a', 4); ellip(c, cx, cy, R0 - 30, R0 - 30, '#8a6a3a', 3); glowSeal(c, cx, cy, t);
+  const pos = [[cx, cy - R0], [cx + R0, cy], [cx, cy + R0], [cx - R0, cy]];
+  pos.forEach((p, i) => {
+    const hv = Math.hypot(mouse.x - p[0], mouse.y - p[1]) < 34; ellip(c, p[0], p[1], 32, 32, hv ? '#fff0c0' : '#fff8e0', 3.5); c.font = '36px ' + FONT; c.textAlign = 'center'; c.fillStyle = INK; c.fillText(SYM[arr[i]], p[0], p[1] + 12);
+    btns.push({ x: p[0] - 32, y: p[1] - 32, w: 64, h: 64, fn: () => { arr[i] = (arr[i] + 1) % 5; sfx('click'); } });
+  });
+  txt(c, 'O', cx + R0 + 48, cy + 6, 14, '#5a4030', 'left', false, false); txt(c, 'W', cx - R0 - 48, cy + 6, 14, '#5a4030', 'right', false, false);
+  button(c, W / 2 - 150, 452, 140, 40, 'Prüfen', () => {
+    if (arr[0] === 1 && arr[1] === 2 && arr[2] === 3 && arr[3] === 4) {
+      sfx('success'); ui = null; const r = ringDone; ringDone = null;
+      if (!herz) { setF('schaleOk'); r && r(); return; }
+      setF('ringOk'); note('Der Ring des Herzens sitzt nun richtig. Jetzt fehlt nur noch Energie.');
+      setTimeout(async () => { busy = true; await say('mira', 'Klick! Der Ring rastet ein. Das Herz summt leise – aber das Innere ist noch leer. Es braucht Energie.'); busy = false; r && r(); }, 10);
+    } else { sfx('fail'); showToast(herz ? 'Der Ring klemmt. Das stimmt noch nicht.' : 'Die Schale bleibt dunkel. Das stimmt noch nicht.'); }
+  });
+  button(c, W / 2 + 10, 452, 140, 40, 'Schließen', () => { ui = null; const r = ringDone; ringDone = null; r && r(); }, { fill: '#e8c890' });
+  if (herz && F('ringOk')) txt(c, 'Der Ring sitzt.', W / 2, 442, 14, '#2a8a3a', 'center', false, false);
+}
+
+/* ----- Girlanden ordnen ----- */
+function drawGarland(c, t) {
+  c.fillStyle = 'rgba(10,6,20,.78)'; c.fillRect(0, 0, W, H); panel(c, 130, 110, 700, 320);
+  txt(c, 'Klanggirlanden ordnen', W / 2, 160, 28, '#3a8a3a', 'center', true, false);
+  txt(c, 'Klicke zwei Girlanden nacheinander an, um sie zu vertauschen. (Tipp: die Holzscheibe im Hain)', W / 2, 190, 15, '#5a4030', 'center', false, false);
+  S.girl.forEach((g, i) => {
+    const x = 230 + i * 250, y = 290;
+    if (gSel === i) { c.fillStyle = 'rgba(255,226,138,.6)'; c.beginPath(); c.roundRect(x - 90, y - 60, 180, 130, 16); c.fill(); }
+    c.beginPath(); c.moveTo(x - 70, y - 30); c.quadraticCurveTo(x, y + 60, x + 70, y - 30); c.lineWidth = 12; c.strokeStyle = INK; c.stroke(); c.lineWidth = 7; c.strokeStyle = GIRL[g]; c.stroke();
+    for (let k = 0; k < 7; k++) { const px = x - 60 + k * 20; c.fillStyle = mix(GIRL[g], '#ffffff', .25); c.beginPath(); c.arc(px, y - 10 + Math.sin(k / 6 * 3.14) * 32 + Math.sin(t * 2 + k) * 2, 6, 0, 7); c.fill(); stroke(c, 2); }
+    btns.push({ x: x - 90, y: y - 60, w: 180, h: 130, fn: () => { sfx('click'); if (gSel < 0) gSel = i; else if (gSel === i) gSel = -1; else { const a = S.girl[gSel]; S.girl[gSel] = S.girl[i]; S.girl[i] = a; gSel = -1; checkGirl(); } } });
+  });
+  button(c, W / 2 - 60, 380, 120, 36, 'Schließen', () => { ui = null; gSel = -1; }, { size: 16 });
+}
+
+/* ----- Direkt benutzbare Gegenstände ----- */
+async function directItem(id) {
+  if (id === 'herz') { if (F('herzAktiv')) return say('mira', 'Das Herz pulsiert warm. ' + (S.unlocked.length ? 'Frei: ' + S.unlocked.map(s => SEASONS[s]).join(', ') + '.' : '')); ringKind = 'herz'; ui = 'ring'; return new Promise(res => { ringDone = res; }); }
+  if (id === 'notizen') return readNotes();
+  if (id === 'tagebuch') return readTagebuch();
+  if (id === 'kristall') { ui = 'map'; return; }
+  if (id === 'flascheSee') { swap('flascheSee', 'flasche'); sfx('use'); return say('mira', 'Ich gieße das Seewasser aus. Die Flasche ist wieder leer.'); }
+}
+
+/* ----- Jahreszeit-Sperren ----- */
+function canSwitch() { return S.hasHeart && SC[S.scene].switchable !== false; }
+async function noSwitchMsg() { busy = true; try { await say('mira', 'Hier reagiert das Herz nicht – dieser Ort ist an seine Zeit gebunden.'); } finally { busy = false; } }
+
+/* ----- Karte ----- */
+const MP = { lager: [205, 815], dorf: [230, 500], feld: [440, 375], werkstatt: [430, 690], garten: [710, 570], weide: [830, 730], markt: [1215, 510], huette: [780, 440], see: [1170, 730], insel: [1370, 760], wald: [1470, 330], hain: [1200, 330], tor: [760, 255], schloss: [850, 85], bergpfad: [190, 255], grube: [490, 250], furt: [935, 620], adlerhorst: [1540, 90], ballonwiese: [1035, 440] };
+const MAPE = [['lager', 'dorf'], ['dorf', 'feld'], ['dorf', 'werkstatt'], ['werkstatt', 'bergpfad'], ['bergpfad', 'grube'], ['werkstatt', 'garten'], ['garten', 'weide'], ['weide', 'furt'], ['furt', 'markt'], ['markt', 'huette'], ['markt', 'see'], ['see', 'insel'], ['see', 'wald'], ['wald', 'hain'], ['hain', 'tor'], ['tor', 'schloss'], ['markt', 'ballonwiese']];
+const MTITLE = id => SC[id].title.replace('Elias\' ', '').replace('Wald der wiederholten Wege', 'Nebelwald');
+const mpos = id => [90 + MP[id][0] * .4665, 96 + MP[id][1] * .4038];
+function drawMap(c, t) {
+  c.fillStyle = 'rgba(10,6,20,.78)'; c.fillRect(0, 0, W, H); panel(c, 60, 24, 840, 492, '#e8d4a0');
+  txt(c, 'Karte von Avelorn', W / 2, 74, 28, '#5a3a20', 'center', true, false);
+  c.save(); c.beginPath(); c.roundRect(90, 96, 780, 380, 12); c.clip(); c.fillStyle = grad(c, 0, 96, 0, 476, ['#dcc890', '#c9b070']); c.fillRect(90, 96, 780, 380);
+  const r = R(12); for (let i = 0; i < 14; i++) blob(c, 120 + r() * 720, 120 + r() * 340, 40 + r() * 50, 20 + r() * 30, 'rgba(100,150,70,.22)', i + 3, 0, false);
+  blob(c, 640, 400, 90, 34, 'rgba(90,160,220,.55)', 5, 2, false); blob(c, 200, 190, 60, 24, 'rgba(120,120,140,.35)', 6, 0, false);
+  for (let i = 0; i < 8; i++) { const mx = 110 + i * 34, my = 190 + (i % 2) * 14; poly(c, [[mx - 16, my + 16], [mx, my - 12], [mx + 16, my + 16]], 'rgba(120,110,140,.5)', 1.5); }
+  c.restore();
+  const seen = id => S.visited[id];
+  MAPE.forEach(([a, b]) => { if (seen(a) && seen(b)) { const p = mpos(a), q = mpos(b); c.setLineDash([8, 7]); line(c, [p, q], '#7a4a2a', 3); c.setLineDash([]); } });
+  const can = has('kristall') && !SC[S.scene].noTravel;
+  Object.keys(MP).forEach(id => {
+    const [x, y] = mpos(id);
+    if (!seen(id)) { const adj = MAPE.some(e => (e[0] === id && seen(e[1])) || (e[1] === id && seen(e[0]))); if (adj) txt(c, '?', x, y + 10, 30, '#7a4a2a', 'center', true, false); return; }
+    const hv = Math.hypot(mouse.x - x, mouse.y - y) < 16, ok = can && id !== S.scene && !SC[id].noTravel;
+    ellip(c, x, y, hv && ok ? 13 : 10, hv && ok ? 13 : 10, PAL[seasonOf(id)].ground, 3.5); if (id === 'schloss') castle(c, x, y - 4, .1, '#e8d8c8', '#9a4a30');
+    txt(c, MTITLE(id), x, y + 26, 13, '#3a2410', 'center', true, false);
+    if (id === S.scene) { line(c, [[x, y - 10], [x, y - 34]], INK, 3); poly(c, [[x, y - 34], [x + 20, y - 27], [x, y - 20]], '#d04848', 2.5); }
+    if (ok) btns.push({ x: x - 16, y: y - 16, w: 32, h: 32, fn: () => travelTo(id) });
+  });
+  txt(c, has('kristall') ? (SC[S.scene].noTravel ? 'Hier wirkt der Wegkristall nicht.' : 'Klicke einen bekannten Ort: Der Wegkristall bringt dich hin.') : '? = angrenzender, noch unbekannter Ort', 100, 500, 15, '#5a4030', 'left', false, false);
+  button(c, 780, 40, 100, 34, 'Schließen', () => { ui = null; }, { size: 16 });
+}
+async function travelTo(id) {
+  if (busy) return; ui = null; busy = true;
+  try { sfx('season'); flash = 1; await gotoScene(id); } finally { busy = false; }
+}
+SC.insel.noTravel = true;
+
+/* ----- Malen für Intro und Enden ----- */
+function quadSeasons(c, t) {
+  ['fr', 'so', 'he', 'wi'].forEach((s, i) => {
+    const x = (i % 2) * W / 2, y = Math.floor(i / 2) * H / 2; c.save(); c.beginPath(); c.rect(x, y, W / 2, H / 2); c.clip(); c.translate(x, y); c.scale(.5, .5);
+    drawSky(c, t, s); mountains(c, PAL[s], 250, 300 + i, PAL[s].mtn, s !== 'he'); groundBase(c, PAL[s], s); tree(c, 200, 470, 1.3, s, 400 + i); pine(c, 760, 470, 1.2, s, 410 + i); c.restore();
+  });
+  c.strokeStyle = INK; c.lineWidth = 6; c.beginPath(); c.moveTo(W / 2, 0); c.lineTo(W / 2, H); c.moveTo(0, H / 2); c.lineTo(W, H / 2); c.stroke();
+}
+const introCache = {};
+function cached(key, fn) { if (!introCache[key]) { const cv2 = document.createElement('canvas'); cv2.width = W; cv2.height = H; fn(cv2.getContext('2d')); introCache[key] = cv2; } return introCache[key]; }
+function sealDisc(c, x, y, r, e, col) { ellip(c, x, y, r, r, col, 3.5); ellip(c, x, y, r * .72, r * .72, null, 2); c.font = Math.round(r * 1.1) + 'px ' + FONT; c.textAlign = 'center'; c.fillStyle = INK; c.fillText(e, x, y + r * .38); }
+const INTRO = [
+  { text: 'Im Tal von Avelorn tanzten die vier Jahreszeiten seit jeher im Reigen: Der Frühling weckte, der Sommer nährte, der Herbst erntete, der Winter ruhte.',
+    draw(c, t) { c.drawImage(cached('i0', g => quadSeasons(g, 0)), 0, 0); } },
+  { top: true, text: 'Hoch über dem Tal, im Schloss auf dem Berg, lebte Fürst Corvin mit seiner Frau Aveline. Sie liebte den Wechsel der Zeiten mehr als alles andere.',
+    draw(c, t) { c.drawImage(cached('i1', g => { drawSky(g, 0, 'fr'); mountains(g, PAL.fr, 250, 310, PAL.fr.mtn, true); hills(g, 340, 26, PAL.fr.hill1, 5); castle(g, 480, 400, 1.7, '#e8d8c8', '#9a4a30'); hills(g, 410, 18, PAL.fr.hill2, 8); g.fillStyle = PAL.fr.ground; g.fillRect(0, 420, W, H); for (let i = 0; i < 6; i++) tree(g, 60 + i * 170, 470 + (i % 2) * 20, .7, i % 2 ? 'fr' : 'so', 420 + i); }), 0, 0); drawChar(c, 300, 480, CHAR.aveline, { dir: 1, t, sc: 1.1 }); drawChar(c, 360, 480, CHAR.corvin, { dir: -1, t, sc: 1.1 }); c.font = '40px ' + FONT; c.textAlign = 'center'; c.fillStyle = '#e83a5a'; c.fillText('♥', 330 + Math.sin(t * 2) * 4, 340 - (t * 20) % 40); } },
+  { text: 'Als Aveline starb, konnte Corvin nicht loslassen. Aus Trauer band er das ganze Tal an einen einzigen, ewigen Sommertag. Seitdem geraten die Jahreszeiten durcheinander – und im Tal schneit es mitten im Herbst.',
+    draw(c, t) { c.drawImage(cached('i2', g => { drawSky(g, 0, 'wi'); mountains(g, PAL.wi, 250, 320, PAL.wi.mtn, true); groundBase(g, PAL.wi, 'wi'); for (let i = 0; i < 9; i++) pine(g, 30 + i * 120, 450 + (i % 2) * 24, .8, 'wi', 430 + i); g.save(); g.beginPath(); g.arc(480, 330, 230, 0, 7); g.clip(); drawSky(g, 0, 'so'); hills(g, 340, 26, '#e8c23a', 5); g.fillStyle = '#c8a02a'; g.fillRect(0, 410, W, H); g.restore(); g.beginPath(); g.arc(480, 330, 230, 0, 7); g.strokeStyle = INK; g.lineWidth = 6; g.stroke(); castle(g, 480, 420, 1.5, '#e8d8c8', '#9a4a30'); }), 0, 0); drawParticles(c, t, 'wi'); } },
+  { top: true, text: 'Der Alchemist Elias erkannte die Gefahr. Er versteckte die vier Jahreszeitensiegel im ganzen Tal, ließ sein Jahreszeitenherz im Lager zurück – und verschwand.',
+    draw(c, t) { c.drawImage(cached('i3', g => { g.fillStyle = grad(g, 0, 0, 0, H, ['#1a0e2a', '#3a2450']); g.fillRect(0, 0, W, H); g.fillStyle = '#5a3a20'; g.fillRect(0, 470, W, 70); rrect(g, 140, 430, 380, 24, 4, '#8a5a30', 4); rrect(g, 170, 454, 16, 40, 2, '#6a4422', 3); rrect(g, 470, 454, 16, 40, 2, '#6a4422', 3); rrect(g, 220, 404, 60, 26, 2, '#f0e6c0', 3); }), 0, 0);
+      glow(c, 400, 380, 260, 'rgba(255,200,100,A)', .35); flame(c, 400, 424, .6, t); rrect(c, 394, 424, 12, 20, 2, '#f4ecd0', 2.5);
+      drawChar(c, 330, 470, CHAR.elias, { dir: 1, t, sc: 1.7 });
+      [['🌸', '#ffb6d1'], ['☀️', '#ffd84a'], ['🍂', '#e77b26'], ['❄️', '#a9d8ff']].forEach(([e, col], i) => { const a = t * .7 + i * 1.57; sealDisc(c, 700 + Math.cos(a) * 110, 260 + Math.sin(a) * 60, 30, e, col); }); } },
+  { top: true, text: 'Seine Schülerin Mira, Alchemistin und Sturkopf, folgt seiner Spur in ein verlassenes Lager am Waldrand. Sie ahnt noch nicht, dass sie über die Zukunft des ganzen Tals entscheiden wird.',
+    draw(c, t) { c.drawImage(cached('i4', g => { drawSky(g, 0, 'wi'); SC.lager.land(g, PAL.wi, 'wi'); }), 0, 0); drawParticles(c, t, 'wi'); const mx = 100 + (t * 30) % 300; drawChar(c, mx, 470, CHAR.mira, { dir: 1, ph: t * 12, walking: true, t, sc: 1.6 }); } }
+];
+let introIdx = 0, introT0 = 0;
+function drawIntro(c, t) {
+  const p = INTRO[introIdx]; c.fillStyle = '#0a0610'; c.fillRect(0, 0, W, H);
+  c.save(); c.beginPath(); c.roundRect(20, 20, W - 40, H - 40, 16); c.clip(); p.draw(c, t); c.restore();
+  c.beginPath(); c.roundRect(20, 20, W - 40, H - 40, 16); c.lineWidth = 8; c.strokeStyle = INK; c.stroke();
+  const shown = Math.floor((now() - introT0) * 42), lines = wrap(c, p.text, 780, 24), h = lines.length * 32 + 30;
+  const y0 = p.top ? 74 : H - 40 - h;
+  c.fillStyle = '#fffdf2'; c.beginPath(); c.roundRect(60, y0, W - 120, h, 14); c.fill(); stroke(c, 4);
+  let n = 0; lines.forEach((l, i) => { const seg = l.slice(0, Math.max(0, shown - n)); n += l.length + 1; c.font = 'bold 24px ' + FONT; c.textAlign = 'left'; c.fillStyle = INK; c.fillText(seg, 84, y0 + 40 + i * 32); });
+  txt(c, (introIdx + 1) + ' / ' + INTRO.length + '  ·  Klick: weiter', W - 44, 50, 15, '#fff', 'right');
+  button(c, 30, 30, 130, 30, 'Überspringen', finishIntro, { size: 14, fill: '#e8c890' });
+  btns.unshift({ x: 0, y: 0, w: W, h: H, fn: introAdvance });
+}
+function introAdvance() { const p = INTRO[introIdx]; if ((now() - introT0) * 42 < p.text.length) { introT0 = -1e9; return; } if (introIdx < INTRO.length - 1) { introIdx++; introT0 = now(); sfx('page'); } else finishIntro(); }
+function finishIntro() { if (ui !== 'intro') return; beginGame(); }
+async function beginGame() {
+  ui = null; busy = true; try { await fadeTo(1); landKey = ''; await fadeTo(0); await SC.lager.onEnter(); } finally { busy = false; }
+}
+async function startNew() {
+  initAudio(); startMusic(); S = newState(); landKey = ''; S.visited.lager = true; hover = null; sel = null; speech = null; choiceSt = null;
+  if (AUTO) { ui = null; await beginGame(); return; }
+  ui = 'intro'; introIdx = 0; introT0 = now();
+}
+
+/* ----- Enden ----- */
+const ENDINGS = {
+  A: { title: 'Ende A – Wiederherstellung', pages: ['Mira legt die vier Siegel in die Schale und spricht die alten Worte. Das Schloss erwacht: Auf den Frühling folgt der Sommer, auf den Sommer der Herbst, auf den Herbst der Winter – wie in alten Zeiten, verlässlich wie eine Uhr.', 'Fürst Corvin zieht sich in Avelines Garten zurück und lernt, dass Erinnern nicht Festhalten heißt. Elias bleibt als Hüter der Siegel im Schloss – diesmal mit offener Tür.', 'Das Tal von Avelorn atmet auf. Jede Jahreszeit hat wieder ihre Zeit.'] },
+  B: { title: 'Ende B – Freier Wandel', pages: ['Mira zerbricht die Bindung. Die vier Siegel zerfallen zu funkelndem Staub, der als Frühlingsregen, Sommerwind, Herbstlaub und Winterschnee über das Tal weht.', 'Von diesem Tag an folgen die Jahreszeiten nur noch der Natur – unberechenbar, mal kurz, mal lang, nie zweimal gleich. Corvin sieht den ersten frei wachsenden Frühling und weint: aus Trauer und aus Erleichterung.', 'Elias lächelt. „Freiheit hat ihren Preis", sagt er. „Aber sie ist ihn wert."'] },
+  C: { title: 'Ende C – Behutsame Neuordnung', pages: ['Mira verteilt die Siegel auf die Hüter des Tals: Selma bewahrt das Frühlingssiegel in ihrem Garten, Runa das Sommersiegel in ihrer Schmiede, Nim das Herbstsiegel im Wald und Orin das Wintersiegel unter den Sternen.', 'Hedda erzählt den Kindern von Avelines Wechsel der Zeiten, Fenn verkauft Kürbissuppe an alle vier Jahreszeiten, Brann öffnet das Tor für jeden, der einen Zweig Apfelblüten mitbringt, und Ansgar ruft: „Glück auf!"', 'Corvin und Elias sitzen an Avelines Grab, während Frühling, Sommer, Herbst und Winter sich abwechseln – jede in ihrer Zeit, alle zusammen ein ganzes Jahr, wie ein Lied mit vielen Stimmen.'] }
+};
+let endKind = 'A', endPage = 0, endT0 = 0;
+async function startEnding(kind) {
+  endKind = kind; endPage = 0; endT0 = now(); sfx('success'); await fadeTo(1); ui = 'ending'; await fadeTo(0); saveGame('slvj_auto'); setF('ende_' + kind);
+}
+function drawEnding(c, t) {
+  const E = ENDINGS[endKind], last = endPage >= E.pages.length;
+  c.fillStyle = '#0a0610'; c.fillRect(0, 0, W, H);
+  c.save(); c.beginPath(); c.roundRect(20, 20, W - 40, H - 40, 16); c.clip();
+  c.drawImage(cached('e' + endKind, g => quadSeasons(g, 0)), 0, 0);
+  if (endKind === 'B') { for (let i = 0; i < 40; i++) { const a = t * .5 + i, x = (i * 97 + t * 30) % W, y = (i * 53 + Math.sin(a) * 30 + t * 20) % H; c.fillStyle = ['#ffb6d1', '#ffd84a', '#e77b26', '#fff'][i % 4]; c.beginPath(); c.arc(x, y, 4, 0, 7); c.fill(); } }
+  if (endKind === 'C') { [['selma', 240, 260], ['runa', 720, 260], ['nim', 240, 530], ['orin', 720, 530]].forEach(([id, x, y]) => drawChar(c, x, y - 20, CHAR[id], { dir: 1, t, sc: 1.2 })); }
+  if (endKind === 'A') { castle(c, W / 2, 330, .9, '#e8d8c8', '#9a4a30'); }
+  c.fillStyle = 'rgba(10,6,20,.35)'; c.fillRect(0, 0, W, H); c.restore();
+  c.beginPath(); c.roundRect(20, 20, W - 40, H - 40, 16); c.lineWidth = 8; c.strokeStyle = INK; c.stroke();
+  txt(c, E.title, W / 2, 70, 34, '#ffe28a', 'center');
+  if (!last) {
+    const txtp = E.pages[endPage], lines = wrap(c, txtp, 780, 24), h = lines.length * 32 + 30, shown = Math.floor((now() - endT0) * 42);
+    c.fillStyle = '#fffdf2'; c.beginPath(); c.roundRect(60, H - 50 - h, W - 120, h, 14); c.fill(); stroke(c, 4);
+    let n = 0; lines.forEach((l, i) => { const seg = l.slice(0, Math.max(0, shown - n)); n += l.length + 1; c.font = 'bold 24px ' + FONT; c.textAlign = 'left'; c.fillStyle = INK; c.fillText(seg, 84, H - 50 - h + 40 + i * 32); });
+    btns.unshift({ x: 0, y: 0, w: W, h: H, fn: endAdvance });
+  } else {
+    panel(c, 220, 130, 520, 280);
+    txt(c, 'ENDE', W / 2, 190, 44, '#7b3fb8', 'center', true, false);
+    const m = Math.floor(S.playTime / 60); txt(c, 'Spielzeit: ' + m + ' Min. · Einsichten: ' + S.insights.length + ' / ' + INSIGHT_TOTAL, W / 2, 232, 20, '#5a3a20', 'center', true, false);
+    txt(c, 'Idee & Spieldesign: Jan', W / 2, 272, 18, '#5a4030', 'center', false, false); txt(c, 'Umsetzung: Claude · alle Grafiken im Code gemalt', W / 2, 298, 18, '#5a4030', 'center', false, false);
+    button(c, W / 2 - 200, 336, 190, 46, 'Zum Titel', () => { ui = 'title'; }, { size: 20 });
+    button(c, W / 2 + 10, 336, 190, 46, 'Weiterspielen', () => { ui = null; }, { size: 20, fill: '#e8c890' });
+  }
+}
+function endAdvance() { const E = ENDINGS[endKind]; if (endPage < E.pages.length && (now() - endT0) * 42 < E.pages[endPage].length) { endT0 = -1e9; return; } endPage++; endT0 = now(); }
+
+/* ----- Ziele der zweiten Hälfte ----- */
+OBJ.push(
+  { id: 'garten', t: 'Selmas Pflanzen den richtigen Sockeln zuordnen.', show: () => F('segment'), done: () => F('gartenOk'), h: ['Selmas Garten liegt hinter der Werkstatt.', 'Beobachte, wann welche Pflanze blüht – schalte dazu die Jahreszeit um.', 'Grün öffnet im Frühling, Violett im Sommer, Oliv im Herbst. Der Silberfarn öffnet sich nie, solange es warm ist – er gehört auf den Winter-Sockel.'] },
+  { id: 'nim', t: 'Nim im Weidenhain wecken.', show: () => F('gartenOk'), done: () => F('nimWach'), h: ['Selma hat dir Girlanden mitgegeben. Nim schläft unter der Weide.', 'Die Holzscheibe zeigt die Reihenfolge der Farben – von innen nach außen.', 'Häng die Girlanden an den Ast, ordne sie links violett, Mitte gelb, rechts grün – dann wähle den Herbst.'] },
+  { id: 'furt', t: 'Den Bach an der Furt überqueren.', show: () => F('nimWach'), done: () => F('platteGelegt'), h: ['Im Frühling ist der Bach zu reißend.', 'Die Steinplatte am Ufer könnte eine Brücke sein – wenn das Wasser niedrig ist.', 'Stell die Furt auf Sommer und hebele die Steinplatte mit Runas Brechstange in die Lücke. Hinüber geht es nur bei Niedrigwasser im Sommer.'] },
+  { id: 'insel', t: 'Das Wintersiegel auf der Insel finden.', show: () => F('orinMet'), done: () => F('sWi'), h: ['Orin weiß, wie man im Winter zur Insel kommt.', 'Asche zeigt dünne Stellen im Eis. Der Schatten des Engels zeigt, wo gegraben wird.', 'Kessel mit Asche aus dem Ofen füllen, See auf Winter stellen, Asche aufs Eis streuen. Auf der Insel im Winter sehen, wo der Schatten endet, dann in einer wärmeren Jahreszeit dort mit der Axt graben.'] },
+  { id: 'trank', t: 'Den Klarsicht-Trank für den Nebelwald brauen.', show: () => F('orinInfo'), done: () => F('brewDone') || F('trankGetrunken'), h: ['Elias\' Rezept liegt im Kräuterlager. Fenn hat einen Eimer.', 'Quellwasser gibt es nur im Winter an der Aschestelle, Birkensaft nur im Frühling.', 'Kürbis gegen Fenns Eimer tauschen. Flasche vom Bord im Winter an der Aschestelle füllen. Im Frühling die Birke am See mit der Axt anritzen und den Eimer darunter halten. Beides in den Kessel, mit Zunder aus der Kiste anzünden, Trank in die Flasche füllen.'] },
+  { id: 'wald', t: 'Den Weg durch den Wald der wiederholten Wege finden.', show: () => F('trankGetrunken'), done: () => F('waldOk'), h: ['Lio kennt einen Reim zum Nebelwald.', 'Es geht um drei Wegweiser: Wolke, Vögel, Baum.', 'Erst dem Pfad unter der Wolke, die wie ein Berg aussieht, dann dem größten Vogelschwarm, zuletzt dem verschneiten Baum.'] },
+  { id: 'hain', t: 'Das Herbstsiegel im Gedächtnishain finden.', show: () => F('waldOk'), done: () => F('sHe'), h: ['Im Herbst erwachen die Erinnerungen der Baumstümpfe.', 'Denk an den Kreislauf des Getreides auf dem Feld.', 'Ordne die Bilder nach dem Feld: Keimling, reifer Weizen, Garbe, Sack.'] },
+  { id: 'tor', t: 'An Brann, dem Torwächter, vorbeikommen.', show: () => F('brannMet'), done: () => F('torOffen'), h: ['Brann sehnt sich nach einem Frühlingsgruß.', 'Ein Apfelbaum im Dorf blüht im Frühling.', 'Dorfplatz auf Frühling stellen, mit der Axt einen blühenden Zweig vom Apfelbaum schneiden und Brann geben.'] },
+  { id: 'corvin', t: 'Fürst Corvin überzeugen.', show: () => F('corvinMet'), done: () => F('sSo'), h: ['Corvin will Avelines eigene Worte hören.', 'Ihr Tagebuch liegt im Adlerhorst, hoch über den Wolken.', 'Hol Avelines Tagebuch aus dem Adlerhorst und lies Corvin daraus vor.'] },
+  { id: 'tagebuch', t: 'Avelines Tagebuch aus dem Adlerhorst holen.', show: () => F('tagebuchZiel'), done: () => has('tagebuch') || F('tagebuchGelesen'), h: ['Fenn kennt einen Ballon auf der Ballonwiese.', 'Die Hülle braucht einen Flicken (Leinentuch + Nadel & Garn), der Feuerkorb Stroh. Kalte Luft trägt besser.', 'Leinentuch vom Dreibein im Lager, Nadel und Garn von Selma, kombinieren, auf die Hülle. Strohgarben im Herbst vom Erntefeld in den Feuerkorb. Ballonwiese auf Winter stellen und starten. Oben: Die Störche ziehen im Herbst fort – dann ins Nest klettern und die Dose mit der Brechstange öffnen.'] },
+  { id: 'sockel', t: 'Die vier Siegel in die Siegelschale setzen.', show: () => F('sSo'), done: () => F('schaleOk'), h: ['Die Schale steht auf dem Schlossberg.', 'Wie beim Herz: nach dem Lauf der Sonne.', 'Oben Frühling, rechts Sommer, unten Winter, links Herbst.'] },
+  { id: 'ende', t: 'Entscheiden, wie die Siegel künftig wirken sollen.', show: () => F('eliasFrei'), done: () => false, h: ['Sprich mit Elias.', 'Für Ende C brauchst du mindestens 6 Einsichten.', 'Einsichten gibt es bei Runa, Tovin, Lio, Selma, Nim, Orin, Hedda, Fenn, Brann, Ansgar, an Avelines Grab und in ihrem Tagebuch.'] }
+);
+
+async function runaSegment() {
+  if (F('segment')) return; take('haematit'); setF('segment'); if (!S.unlocked.includes('he')) S.unlocked.push('he'); sfx('success');
+  await say('runa', 'Hämatit! Ein prächtiger Brocken. Verhüttung ist simpel: Holzkohle nimmt dem Eisenoxid den Sauerstoff weg – bei gut tausend Grad. Genau dafür brennt mein Ofen.');
+  await say('runa', 'Ich schmiede dir ein Segment aus Sternstahl und setze es in dein Herz. So … fertig.');
+  flash = 1; await sleep(500); await say('mira', 'Das Herz vibriert! Jetzt kann es auch den Herbst!'); note('Das Herz kann nun auch den Herbst. Hinter der Werkstatt führt ein Torbogen zu Selmas Garten.');
+}
+/* ----- Start ----- */
+window.G = { S: () => S, SC, interact, objects, invClick, gotoScene, switchSeason, setAuto: v => { AUTO = v; }, findObj: id => objects().find(o => o.id === id), F, has, ITEMS, ui: () => ui, setUi: v => { ui = v; }, busy: () => busy, startNew, choose: null };
+requestAnimationFrame(loop);
