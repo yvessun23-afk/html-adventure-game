@@ -74,7 +74,7 @@ function drawChar(c, x, y, ch, o = {}) {
   const dx = Math.round(x - 80), dy = Math.round(y - 126);
   c.imageSmoothingEnabled = false;
   if (o.a != null) c.globalAlpha = o.a;
-  if (dir < 0) { c.save(); c.translate(dx + 160, dy); c.scale(-1, 1); c.drawImage(im, frame * 80, row * 64, 80, 64, 0, 0, 160, 128); c.restore(); }
+  if (dir > 0) { c.save(); c.translate(dx + 160, dy); c.scale(-1, 1); c.drawImage(im, frame * 80, row * 64, 80, 64, 0, 0, 160, 128); c.restore(); }
   else c.drawImage(im, frame * 80, row * 64, 80, 64, dx, dy, 160, 128);
   if (o.a != null) c.globalAlpha = 1;
 }
