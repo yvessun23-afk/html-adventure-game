@@ -549,6 +549,12 @@ function drawMenu(c) {
 }
 
 /* ----- Hauptschleife ----- */
+/* Treffer: unter mehreren überlagerten Objekten gewinnt das kleinste (spezifischste); bei Gleichstand das später gezeichnete */
+function pickHit(os, x, y) {
+  let best = null, ba = 1e12;
+  for (const o of os) { if (!o.r[2] || !o.r[3]) continue; if (x >= o.r[0] && x <= o.r[0] + o.r[2] && y >= o.r[1] && y <= o.r[1] + o.r[3]) { const ar = o.r[2] * o.r[3]; if (ar <= ba) { ba = ar; best = o; } } }
+  return best;
+}
 let last = now(), tSum = 0;
 function loop() {
   const t = now(), dt = Math.min(.05, t - last); last = t; tSum += dt; btns = [];
@@ -559,7 +565,7 @@ function loop() {
     // Bewegung
     if (S.target != null) { const d = S.target - S.x; if (Math.abs(d) < 3) { S.target = null; } else { S.dir = Math.sign(d); S.x += Math.sign(d) * Math.min(Math.abs(d), 230 * dt); mira.ph += dt * 14; } } else mira.ph = 0;
     S.playTime += dt;
-    hover = null; if (!busy && ui === null && !choiceSt && mouse.in) { const os = objects(); const hit = os.filter(o => mouse.x >= o.r[0] && mouse.x <= o.r[0] + o.r[2] && mouse.y >= o.r[1] && mouse.y <= o.r[1] + o.r[3]); hover = hit.length ? hit[hit.length - 1] : null; if (mouse.y > H - 76 && barShown) hover = null; }
+    hover = null; if (!busy && ui === null && !choiceSt && mouse.in) { hover = pickHit(objects(), mouse.x, mouse.y); if (mouse.y > H - 76 && barShown) hover = null; }
     drawScene(ctx, tSum, dt);
     if (flash > 0) { ctx.fillStyle = `rgba(255,255,255,${flash})`; ctx.fillRect(0, 0, W, H); flash = Math.max(0, flash - dt * 2); }
     drawHUD(ctx, tSum);
